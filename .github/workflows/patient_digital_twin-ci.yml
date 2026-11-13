@@ -5,13 +5,13 @@ name: Patient Digital Twin CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "dev/**"]
     paths:
       - "patient-digital-twin/**"
       - "pyproject.toml"
       - ".github/workflows/patient_digital_twin-ci.yml"
   pull_request:
-    branches: [main]
+    branches: [main, "dev/**"]
     paths:
       - "patient-digital-twin/**"
       - "pyproject.toml"
@@ -43,6 +43,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            python -m pip install -e ".[claude,codex]"
+          fi
           pytest
           mypy
 
