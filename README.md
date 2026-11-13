@@ -18,6 +18,9 @@ i4h-digital-twin/
 
 Convert clinical or synthetic imaging into vessel/anatomy artifacts and OpenUSD meshes.
 
+Optional [Blender MCP tools](patient-digital-twin/docs/blender.md) let agents view
+and edit anatomy through the existing patient API.
+
 | Component | Status | Purpose |
 | --- | --- | --- |
 | [`patient_digital_twin.export`](./patient-digital-twin/patient_digital_twin/export.py) | Patient module | USD, native HU scan bundles, vessel masks and centerlines |
