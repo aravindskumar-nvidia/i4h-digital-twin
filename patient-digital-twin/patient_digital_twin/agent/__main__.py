@@ -11,8 +11,12 @@ import os
 import shutil
 import sys
 import tempfile
+from datetime import timedelta
 from pathlib import Path
+from threading import Timer
+from typing import cast
 
+from .assets import CenterlineRegenerationError, finalize, prepare
 from .runtime import MCP_PACKAGE, blender_session
 
 BLENDER_TOOLS = ('execute_blender_code', 'get_scene_info', 'look')
@@ -36,8 +40,6 @@ def mcp_config() -> dict:
 
 
 async def blender_call(config: dict, function: str, workspace: Path) -> None:
-    from datetime import timedelta
-
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -56,8 +58,6 @@ async def blender_call(config: dict, function: str, workspace: Path) -> None:
 async def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
                      max_turns: int, budget_usd: float) -> None:
     """Stream a bounded Claude Agent SDK session using its normal authentication."""
-    from typing import cast
-
     from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
     from claude_agent_sdk.types import McpStdioServerConfig
 
@@ -81,8 +81,6 @@ async def run_claude(prompt: str, workspace: Path, config: dict, model: str | No
 
 def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600) -> None:
     """Stream the Codex Python SDK; credentials/config remain owned by Codex."""
-    from threading import Timer
-
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
     overrides = (
@@ -131,8 +129,6 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
 
 def main(argv: list[str] | None = None) -> int:
     """Optionally edit an existing pipeline output; generation itself is unchanged."""
-    from .assets import CenterlineRegenerationError, finalize, prepare
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
     parser.add_argument('--input', type=Path, required=True, help='Pipeline USD or patient_twin.yaml')
@@ -160,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     # Same host/filesystem as Blender; the temporary files never replace the input.
     workspace = Path(tempfile.mkdtemp(prefix='.asset-edit-', dir=output.parent))
     try:
-        settings = prepare(args.input, workspace)
+        settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
         print('Connecting to Blender…', flush=True)
         with blender_session(workspace, config, mode) as config:
             asyncio.run(blender_call(config, 'open_asset', workspace))
@@ -175,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                 run_codex(prompt, workspace, config, args.model, args.timeout)
             print('Exporting edited asset…', flush=True)
             asyncio.run(blender_call(config, 'export_asset', workspace))
-        print(finalize(workspace, output, vessel_names=args.vessel_names))
+        print(finalize(workspace, output))
     except CenterlineRegenerationError as exc:
         print(f'Publication stopped. {exc}', file=sys.stderr)
         print(f'Your Blender edits are saved at {workspace / "edited.blend"}', file=sys.stderr)

@@ -12,15 +12,34 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
+from ..anatomy import Kind, is_vessel
 from ..body import _extract_mesh_centerline
-from ..geometry import transform_points, validate_triangles
+from ..export import _publish
+from ..geometry import native_centerline, transform_points, validate_triangles, voxelize_mesh
+from ..scan_volume import load_artifact
 
 
 class CenterlineRegenerationError(ValueError):
     """An edited surface could not produce its required USD centerline."""
 
 
-def prepare(source: Path, workspace: Path) -> dict:
+def _navigation_vessels(manifest, names):
+    if manifest is None or 'vessel_mask' not in manifest['artifacts']:
+        return []
+    vessels = {name: item for name, item in manifest['anatomy']['structures'].items()
+               if is_vessel(name, Kind(item['kind']))}
+    names = names or manifest.get('navigation', {}).get('vessel_names')
+    if not names:
+        if len(vessels) != 1:
+            raise ValueError('Supply --vessel-names with the original navigation selection. '
+                             f'Available vessels: {", ".join(vessels)}')
+        names = list(vessels)
+    if invalid := [name for name in names if name not in vessels or not vessels[name]['enabled']]:
+        raise ValueError(f'Unknown, disabled, or non-vessel navigation structures: {invalid}')
+    return names
+
+
+def prepare(source: Path, workspace: Path, *, vessel_names: list[str] | None = None) -> dict:
     """Snapshot a standalone USD or schema-2 bundle; hand only scene content to Blender."""
     from pxr import Sdf, Usd, UsdGeom
 
@@ -36,12 +55,14 @@ def prepare(source: Path, workspace: Path) -> dict:
         raise ValueError('Expected a pipeline patient USD with default prim /HumanBody')
     if UsdGeom.GetStageUpAxis(stage) != 'Z':
         raise ValueError('Expected pipeline Z-up geometry')
+    vessel_names = _navigation_vessels(manifest, vessel_names)
     workspace.mkdir(parents=True, exist_ok=True)
     stage.Flatten().Export(str(workspace / 'original.usdc'))
     paths = [str(p.GetPath()) for p in stage.Traverse() if p.IsA(UsdGeom.Mesh)]
     if not paths:
         raise ValueError('The asset has no meshes')
-    settings = dict(source=str(source), usd=str(usd), manifest=manifest, paths=paths, token=uuid4().hex)
+    settings = dict(source=str(source), usd=str(usd), manifest=manifest, paths=paths,
+                    token=uuid4().hex, vessel_names=vessel_names)
     (workspace / 'edit.json').write_text(json.dumps(settings))
     handoff = Usd.Stage.Open(str(workspace / 'original.usdc'))
     handoff.RemovePrim('/HumanBody/Imaging')
@@ -56,10 +77,9 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
     """Merge edits into the original contract and atomically publish a new version."""
     from pxr import Usd, UsdGeom
 
-    from ..export import _publish
-
     settings = json.loads((workspace / 'edit.json').read_text())
     source, manifest = Path(settings['source']), settings['manifest']
+    vessel_names = _navigation_vessels(manifest, vessel_names or settings.get('vessel_names'))
     original = Usd.Stage.Open(str(workspace / 'original.usdc'))
     edited = Usd.Stage.Open(str(workspace / 'edited.usdc'))
     if not edited or UsdGeom.GetStageUpAxis(edited) != 'Z':
@@ -92,10 +112,11 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
             target = folder / manifest['artifacts']['anatomy_usd']
             for item in manifest['anatomy']['structures'].values():
                 item['enabled'] = UsdGeom.Imageable(original.GetPrimAtPath(item['prim_path'])).ComputeVisibility() != 'invisible'
-            if any(changed) and 'vessel_mask' in manifest['artifacts']:
-                if not vessel_names:
-                    raise ValueError('Geometry/visibility changed: supply vessel_names to regenerate navigation artifacts')
-                _navigation(original, manifest, folder, vessel_names)
+            if 'vessel_mask' in manifest['artifacts']:
+                previous = manifest.get('navigation', {}).get('vessel_names', vessel_names)
+                if any(changed) or previous != vessel_names:
+                    _navigation(original, manifest, folder, vessel_names)
+                manifest.setdefault('navigation', {})['vessel_names'] = vessel_names
             (folder / 'patient_twin.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
         _copy_textures(original, workspace, target.parent)
         original.Export(str(target))
@@ -228,9 +249,6 @@ def _copy_textures(stage, workspace, destination):
 def _navigation(stage, manifest, folder, names):
     """Reuse existing voxelization/centerline code; never retain stale navigation arrays."""
     from pxr import UsdGeom
-
-    from ..geometry import native_centerline, voxelize_mesh
-    from ..scan_volume import load_artifact
 
     artifacts = manifest['artifacts']
     scan = load_artifact(folder / artifacts['volume_metadata'])

@@ -39,5 +39,7 @@ The returned USD or manifest is the new Isaac input; source and CT data are
 preserved. For Claude, install the `claude` extra and use `--backend claude`.
 
 See [Blender asset editing](blender.md) for supported edits and the output contract.
-For geometry edits to navigation bundles, pass `--vessel-names aorta ...` with
-the original vessel selection. Use `--help` for session limits and MCP configuration.
+Navigation uses the vessel selection saved in the bundle. Older bundles select
+their sole vessel automatically. For older bundles with several vessels, pass
+`--vessel-names aorta ...`. Selection is checked before Blender starts.
+Use `--help` for session options.

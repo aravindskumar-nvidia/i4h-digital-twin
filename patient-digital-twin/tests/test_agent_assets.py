@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 from patient_digital_twin import HumanBody, SegmentationImporter
 from patient_digital_twin.agent.assets import finalize, prepare
 from patient_digital_twin.scan_volume import from_array
@@ -135,25 +136,39 @@ export_asset({str(work)!r})
     assert textures and all(Path(t.resolvedPath).is_file() for t in textures)
 
 
-def test_bundle_regenerates_navigation_on_original_ct_grid(tmp_path):
+@pytest.mark.parametrize('selection', ['saved', 'single', 'ambiguous'])
+def test_bundle_regenerates_navigation_on_original_ct_grid(tmp_path, selection):
     labels = np.zeros((30, 20, 25), np.uint8)
     labels[3:27, 8:13, 9:14] = 1
-    body = HumanBody(SegmentationImporter(labels, {1: 'aorta'}).to_anatomy_collection())
+    labelmap = {1: 'aorta'}
+    if selection != 'single':
+        labels[3:27, 8:13, 17:22] = 2
+        labelmap[2] = 'inferior_vena_cava'
+    body = HumanBody(SegmentationImporter(labels, labelmap).to_anatomy_collection())
     body.attach_scan(from_array(labels.transpose(2, 1, 0), np.eye(4), world_unit='mm'))
     source = body.export_patient_twin(tmp_path / 'source', vessel_names=['aorta'])
+    manifest = yaml.safe_load(source.read_text())
+    assert manifest['navigation'] == {'vessel_names': ['aorta']}
+    if selection != 'saved':
+        del manifest['navigation']
+        source.write_text(yaml.safe_dump(manifest))
     for name in ('human_body.usdc', 'view.png', 'inference_summary.json'):
         (source.parent / name).write_bytes(b'stale output from the original run')
     work = tmp_path / 'work'
-    prepare(source, work)
+    if selection == 'ambiguous':
+        with pytest.raises(ValueError, match='Supply --vessel-names'):
+            prepare(source, work)
+        with pytest.raises(ValueError, match='Unknown'):
+            prepare(source, work, vessel_names=['missing_vessel'])
+        assert not work.exists()
+    prepare(source, work, vessel_names=['aorta'] if selection == 'ambiguous' else None)
     edited = Usd.Stage.Open(str(work / 'input.usdc'))
     mesh = UsdGeom.Mesh(edited.GetPrimAtPath('/HumanBody/Anatomy/aorta'))
     points = mesh.GetPointsAttr().Get()
     mesh.GetPointsAttr().Set([p + Gf.Vec3f(2, 0, 0) for p in points])
     edited.Export(str(work / 'edited.usdc'))
-    with pytest.raises(ValueError, match='vessel_names'):
-        finalize(work, tmp_path / 'incomplete')
-    assert not (tmp_path / 'incomplete').exists()
-    output = finalize(work, tmp_path / 'final', vessel_names=['aorta'])
+    output = finalize(work, tmp_path / 'final')
+    assert yaml.safe_load(output.read_text())['navigation'] == {'vessel_names': ['aorta']}
     assert not any((output.parent / name).exists() for name in
                    ('human_body.usdc', 'view.png', 'inference_summary.json'))
     assert (output.parent / 'volume.npy').read_bytes() == (source.parent / 'volume.npy').read_bytes()
