@@ -49,7 +49,6 @@ def export_asset(directory):
         raise ValueError('Only mesh edits, materials and textures are supported')
     for obj in meshes:
         obj['i4h_path'] = obj.data['i4h_path']
-        obj['i4h_hidden'] = obj.hide_render or not obj.visible_get()
     with _export_all_meshes(scene):
         bpy.ops.wm.usd_export(filepath=str(folder / 'edited.usdc'), export_animation=False,
                               export_materials=True, generate_preview_surface=True,
@@ -61,7 +60,7 @@ def export_asset(directory):
 
 @contextlib.contextmanager
 def _export_all_meshes(scene):
-    """USD omits hidden geometry; reveal it temporarily and carry visibility as metadata."""
+    """Reveal all meshes temporarily so USD export includes hidden geometry."""
     import bpy
 
     saved, hidden = [], []

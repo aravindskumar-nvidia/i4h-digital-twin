@@ -91,8 +91,6 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
         while prim and not prim.GetAttribute('userProperties:i4h_path'):
             prim = prim.GetParent()
         paths.append(str(prim.GetAttribute('userProperties:i4h_path').Get()) if prim else '')
-        if prim and prim.GetAttribute('userProperties:i4h_hidden').Get():
-            UsdGeom.Imageable(mesh).MakeInvisible()
     if len(paths) != len(set(paths)) or set(paths) != set(settings['paths']):
         raise ValueError('Edited USD must contain each original mesh identity exactly once')
     changed = [_merge_mesh(original.GetPrimAtPath(path), mesh) for path, mesh in zip(paths, meshes)]
@@ -110,8 +108,6 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
                 if key != 'anatomy_usd':
                     shutil.copy2(source.parent / relative, destination)
             target = folder / manifest['artifacts']['anatomy_usd']
-            for item in manifest['anatomy']['structures'].values():
-                item['enabled'] = UsdGeom.Imageable(original.GetPrimAtPath(item['prim_path'])).ComputeVisibility() != 'invisible'
             if 'vessel_mask' in manifest['artifacts']:
                 previous = manifest.get('navigation', {}).get('vessel_names', vessel_names)
                 if any(changed) or previous != vessel_names:
@@ -151,8 +147,6 @@ def _merge_mesh(target, edited) -> bool:
                         or not np.allclose(points * units, old_points * units, rtol=0, atol=1e-7)
                         or not np.array_equal(faces.ravel(), original.GetFaceVertexIndicesAttr().Get())
                         or orientation != original.GetOrientationAttr().Get())
-    visible = UsdGeom.Imageable(edited).ComputeVisibility()
-    visibility_changed = visible != UsdGeom.Imageable(target).ComputeVisibility()
     # Replace appearance properties; leave identity, transforms and unrelated metadata intact.
     names = {p.GetName() for prim in (target, edited) for p in prim.GetAuthoredProperties()
              if p.GetName().startswith(('primvars:', 'material:binding'))}
@@ -190,14 +184,13 @@ def _merge_mesh(target, edited) -> bool:
         original.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(points))
         original.CreateExtentAttr(UsdGeom.PointBased.ComputeExtent(original.GetPointsAttr().Get()))
         original.CreateOrientationAttr(orientation)
-    original.CreateVisibilityAttr(visible)
     for child in target.GetChildren():
         if child.IsA(UsdGeom.Subset):
             stage.RemovePrim(child.GetPath())
     for child in edited.GetChildren():
         if child.IsA(UsdGeom.Subset):
             Sdf.CopySpec(source.GetRootLayer(), child.GetPath(), stage.GetRootLayer(), target.GetPath().AppendChild(child.GetName()))
-    return geometry_changed or visibility_changed
+    return geometry_changed
 
 
 def _merge_materials(original, edited, meshes, paths, token):

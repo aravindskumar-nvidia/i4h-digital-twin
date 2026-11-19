@@ -35,6 +35,7 @@ def test_commit_preserves_ct_texture_and_structure_centerline(asset, tmp_path, d
     source, work = asset
     edited = Usd.Stage.Open(str(work / 'input.usdc'))
     mesh = UsdGeom.Mesh(edited.GetPrimAtPath('/HumanBody/Anatomy/aorta'))
+    mesh.MakeInvisible()
     # A tiny round-off shift should count as unchanged geometry.
     shift = Gf.Vec3f(6 if deform else 1e-6, 0, 0)
     mesh.GetPointsAttr().Set([p + shift for p in mesh.GetPointsAttr().Get()])
@@ -58,6 +59,7 @@ def test_commit_preserves_ct_texture_and_structure_centerline(asset, tmp_path, d
     prim = stage.GetPrimAtPath('/HumanBody/Anatomy/aorta')
     assert prim.GetCustomDataByKey('anatomy:name') == 'aorta'
     old = original.GetPrimAtPath(prim.GetPath())
+    assert UsdGeom.Imageable(prim).ComputeVisibility() == UsdGeom.Imageable(old).ComputeVisibility()
     offset = [6, 0, 0] if deform else [0, 0, 0]
     np.testing.assert_allclose(prim.GetAttribute('centerline:points').Get(),
                                np.asarray(old.GetAttribute('centerline:points').Get()) + offset, atol=1e-5)
@@ -86,11 +88,18 @@ def test_real_blender_geometry_and_textured_material(asset, tmp_path, hidden):
         pytest.skip('Set I4H_TEST_BLENDER to exercise an installed Blender')
     from patient_digital_twin.agent import blender as worker
     source, work = asset
+    if hidden:
+        stage = Usd.Stage.Open(str(source))
+        UsdGeom.Imageable(stage.GetPrimAtPath('/HumanBody/Anatomy')).MakeInvisible()
+        stage.GetRootLayer().Save()
+        prepare(source, work)
     script = tmp_path / 'edit.py'
     script.write_text(f'''exec(compile(open({worker.__file__!r}).read(), {worker.__file__!r}, 'exec'))
 open_asset({str(work)!r})
 import bpy
 obj = next(o for o in bpy.context.scene.objects if o.type == 'MESH')
+obj.hide_viewport = False
+obj.hide_set(False)
 obj.location.x += .001
 obj.data.update()
 bpy.context.view_layer.objects.active = obj
@@ -110,9 +119,9 @@ image.file_format = 'PNG'
 image.save()
 texture.image = image
 material.node_tree.links.new(texture.outputs['Color'], bsdf.inputs['Base Color'])
-obj.hide_render = {hidden!r}
-obj.hide_viewport = {hidden!r}
-obj.hide_set({hidden!r})
+obj.hide_render = {not hidden!r}
+obj.hide_viewport = {not hidden!r}
+obj.hide_set({not hidden!r})
 export_asset({str(work)!r})
 ''')
     subprocess.run([blender, '-b', '--factory-startup', '--python-exit-code', '1', '--python', str(script)], check=True, capture_output=True, text=True)
@@ -120,8 +129,8 @@ export_asset({str(work)!r})
     stage = Usd.Stage.Open(str(output))
     original = Usd.Stage.Open(str(source))
     prim = stage.GetPrimAtPath('/HumanBody/Anatomy/aorta')
-    assert UsdGeom.Imageable(prim).ComputeVisibility() == ('invisible' if hidden else 'inherited')
     old = original.GetPrimAtPath(prim.GetPath())
+    assert UsdGeom.Imageable(prim).ComputeVisibility() == UsdGeom.Imageable(old).ComputeVisibility()
     delta = np.asarray(prim.GetAttribute('points').Get()) - np.asarray(old.GetAttribute('points').Get())
     np.testing.assert_allclose(delta, np.broadcast_to([1., 0., 0.], delta.shape), atol=1e-4)
     assert len(prim.GetAttribute('centerline:points').Get()) > 1
@@ -166,9 +175,11 @@ def test_bundle_regenerates_navigation_on_original_ct_grid(tmp_path, selection):
     mesh = UsdGeom.Mesh(edited.GetPrimAtPath('/HumanBody/Anatomy/aorta'))
     points = mesh.GetPointsAttr().Get()
     mesh.GetPointsAttr().Set([p + Gf.Vec3f(2, 0, 0) for p in points])
+    mesh.MakeInvisible()
     edited.Export(str(work / 'edited.usdc'))
     output = finalize(work, tmp_path / 'final')
     assert yaml.safe_load(output.read_text())['navigation'] == {'vessel_names': ['aorta']}
+    assert yaml.safe_load(output.read_text())['anatomy'] == manifest['anatomy']
     assert not any((output.parent / name).exists() for name in
                    ('human_body.usdc', 'view.png', 'inference_summary.json'))
     assert (output.parent / 'volume.npy').read_bytes() == (source.parent / 'volume.npy').read_bytes()
