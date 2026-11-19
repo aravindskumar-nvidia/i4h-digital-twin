@@ -26,7 +26,9 @@ print(result)  # Use this USD or patient_twin.yaml in Isaac.
 
 The output directory must be new. Only manifest-listed bundle files and required
 textures are published; source files, CT data and original prim identities are
-preserved. Navigation bundles require `vessel_names=["aorta", ...]` when geometry
+preserved. Geometry edits regenerate existing USD centerlines using grid spacing
+estimated from the original graph. If extraction fails, publication stops and the edit files stay in
+the workspace. Navigation bundles require `vessel_names=["aorta", ...]` when geometry
 changes, using the original vessel selection to regenerate masks and centerlines.
 
 Supported: existing meshes, transforms, UVs and USD Preview Surface materials/image

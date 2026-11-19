@@ -131,7 +131,7 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
 
 def main(argv: list[str] | None = None) -> int:
     """Optionally edit an existing pipeline output; generation itself is unchanged."""
-    from .assets import finalize, prepare
+    from .assets import CenterlineRegenerationError, finalize, prepare
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
@@ -176,6 +176,10 @@ def main(argv: list[str] | None = None) -> int:
             print('Exporting edited asset…', flush=True)
             asyncio.run(blender_call(config, 'export_asset', workspace))
         print(finalize(workspace, output, vessel_names=args.vessel_names))
+    except CenterlineRegenerationError as exc:
+        print(f'Publication stopped. {exc}', file=sys.stderr)
+        print(f'Your Blender edits are saved at {workspace / "edited.blend"}', file=sys.stderr)
+        return 1
     except BaseException:
         print(f'Edit failed; recovery files retained at {workspace}', file=sys.stderr)
         raise

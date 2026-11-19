@@ -12,7 +12,12 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
+from ..body import _extract_mesh_centerline
 from ..geometry import transform_points, validate_triangles
+
+
+class CenterlineRegenerationError(ValueError):
+    """An edited surface could not produce its required USD centerline."""
 
 
 def prepare(source: Path, workspace: Path) -> dict:
@@ -132,9 +137,24 @@ def _merge_mesh(target, edited) -> bool:
              if p.GetName().startswith(('primvars:', 'material:binding'))}
     if geometry_changed:
         names.update(set(UsdGeom.Mesh.GetSchemaAttributeNames()) - {'xformOpOrder', 'visibility', 'purpose'})
-        for attr in target.GetAttributes():
-            if attr.GetName().startswith('centerline:'):
-                target.RemoveProperty(attr.GetName())
+        points = points.astype(np.float32)
+        if target.HasAttribute('centerline:points'):
+            try:
+                old_graph = np.asarray(target.GetAttribute('centerline:points').Get())
+                edges = np.asarray(target.GetAttribute('centerline:edges').Get())
+                # Pipeline graphs connect 26-neighbor voxels on a local isotropic grid.
+                steps = old_graph[edges[:, 1]] - old_graph[edges[:, 0]]
+                spacing_m = float(np.median(np.max(np.abs(steps), axis=1))) * units
+                if not np.isfinite(spacing_m) or spacing_m <= 0:
+                    raise ValueError('Original centerline has invalid grid spacing')
+                graph = _extract_mesh_centerline(points.astype(float) * units, faces, spacing_m)
+            except ValueError as exc:
+                raise CenterlineRegenerationError(
+                    f'Cannot regenerate the USD centerline for {target.GetPath()}. {exc}'
+                ) from exc
+            target.GetAttribute('centerline:points').Set(Vt.Vec3fArray.FromNumpy((graph.points / units).astype(np.float32)))
+            target.GetAttribute('centerline:edges').Set(Vt.Vec2iArray.FromNumpy(graph.edges.astype(np.int32)))
+            target.GetAttribute('centerline:radii').Set(Vt.FloatArray.FromNumpy((graph.radii / units).astype(np.float32)))
     for name in names:
         target.RemoveProperty(name)
         prop = edited.GetProperty(name)
@@ -146,7 +166,7 @@ def _merge_mesh(target, edited) -> bool:
             normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-30)
             attr.Set(Vt.Vec3fArray.FromNumpy(normals.astype(np.float32)))
     if geometry_changed:
-        original.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(points.astype(np.float32)))
+        original.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(points))
         original.CreateExtentAttr(UsdGeom.PointBased.ComputeExtent(original.GetPointsAttr().Get()))
         original.CreateOrientationAttr(orientation)
     original.CreateVisibilityAttr(visible)

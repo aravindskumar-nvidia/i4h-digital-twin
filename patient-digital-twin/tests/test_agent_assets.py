@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from patient_digital_twin import CenterlineGraph, HumanBody, SegmentationImporter
+from patient_digital_twin import HumanBody, SegmentationImporter
 from patient_digital_twin.agent.assets import finalize, prepare
 from patient_digital_twin.scan_volume import from_array
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
@@ -15,13 +15,14 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
 @pytest.fixture
 def asset(tmp_path):
-    labels = np.zeros((8, 8, 8), np.uint8)
-    labels[2:6, 2:6, 2:6] = 1
-    affine = np.diag([.002, .003, .004, 1.])
+    labels = np.zeros((100, 50, 90), np.uint8)
+    labels[5:95, 15:35, 15:35] = 1
+    labels[48:50, 24:26, 30:80] = 1  # Thin side branch requires the original fine grid.
+    affine = np.diag([.0005, .0005, .0005, 1.])
     affine[:3, 3] = [.04, -.02, .08]
-    body = HumanBody(SegmentationImporter(labels, {1: 'liver'}, affine_xyz_to_imaging_m=affine).to_anatomy_collection())
+    body = HumanBody(SegmentationImporter(labels, {1: 'aorta'}, affine_xyz_to_imaging_m=affine).to_anatomy_collection())
     body.attach_scan(from_array(labels, affine * np.array([1000, 1000, 1000, 1])[:, None], world_unit='mm'))
-    body.anatomy.structures['liver'].centerline = CenterlineGraph(np.zeros((2, 3)), np.ones(2), np.array([[0, 1]]))
+    body.extract_topology(spacing_m=.0005)
     source = body.export_to_usd(tmp_path / 'patient.usdc')
     work = tmp_path / 'work'
     prepare(source, work)
@@ -29,19 +30,13 @@ def asset(tmp_path):
 
 
 @pytest.mark.parametrize('deform', [False, True])
-def test_commit_preserves_ct_texture_and_invalidates_changed_graph(asset, tmp_path, deform):
+def test_commit_preserves_ct_texture_and_structure_centerline(asset, tmp_path, deform):
     source, work = asset
     edited = Usd.Stage.Open(str(work / 'input.usdc'))
-    mesh = UsdGeom.Mesh(edited.GetPrimAtPath('/HumanBody/Anatomy/liver'))
-    if deform:
-        points = mesh.GetPointsAttr().Get()
-        points[0] += Gf.Vec3f(1, 0, 0)
-        mesh.GetPointsAttr().Set(points)
-    else:
-        # Blender float32 rounding must not replace otherwise unchanged geometry.
-        points = mesh.GetPointsAttr().Get()
-        points[0] += Gf.Vec3f(1e-6, 0, 0)
-        mesh.GetPointsAttr().Set(points)
+    mesh = UsdGeom.Mesh(edited.GetPrimAtPath('/HumanBody/Anatomy/aorta'))
+    # A tiny round-off shift should count as unchanged geometry.
+    shift = Gf.Vec3f(6 if deform else 1e-6, 0, 0)
+    mesh.GetPointsAttr().Set([p + shift for p in mesh.GetPointsAttr().Get()])
     texture = work / 'color.png'
     texture.write_bytes(b'texture-dependency')
     material = UsdShade.MaterialBindingAPI(mesh).ComputeBoundMaterial()[0]
@@ -59,12 +54,14 @@ def test_commit_preserves_ct_texture_and_invalidates_changed_graph(asset, tmp_pa
     ct = '/HumanBody/Imaging/CT'
     for attr in original.GetPrimAtPath(ct).GetAttributes():
         assert stage.GetPrimAtPath(ct).GetAttribute(attr.GetName()).Get() == attr.Get()
-    prim = stage.GetPrimAtPath('/HumanBody/Anatomy/liver')
-    assert prim.GetCustomDataByKey('anatomy:name') == 'liver'
-    assert bool(prim.GetAttribute('centerline:points')) != deform
+    prim = stage.GetPrimAtPath('/HumanBody/Anatomy/aorta')
+    assert prim.GetCustomDataByKey('anatomy:name') == 'aorta'
+    old = original.GetPrimAtPath(prim.GetPath())
+    offset = [6, 0, 0] if deform else [0, 0, 0]
+    np.testing.assert_allclose(prim.GetAttribute('centerline:points').Get(),
+                               np.asarray(old.GetAttribute('centerline:points').Get()) + offset, atol=1e-5)
     if not deform:
-        np.testing.assert_array_equal(prim.GetAttribute('points').Get(),
-                                      original.GetPrimAtPath(prim.GetPath()).GetAttribute('points').Get())
+        assert prim.GetAttribute('points').Get() == old.GetAttribute('points').Get()
     material = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0]
     assert material
     path = stage.GetPrimAtPath(material.GetPath().AppendChild('Texture')).GetAttribute('inputs:file').Get()
@@ -74,7 +71,7 @@ def test_commit_preserves_ct_texture_and_invalidates_changed_graph(asset, tmp_pa
 def test_missing_mesh_never_publishes(asset, tmp_path):
     _, work = asset
     edited = Usd.Stage.Open(str(work / 'input.usdc'))
-    edited.RemovePrim('/HumanBody/Anatomy/liver')
+    edited.RemovePrim('/HumanBody/Anatomy/aorta')
     edited.Export(str(work / 'edited.usdc'))
     with pytest.raises(ValueError, match='identity'):
         finalize(work, tmp_path / 'final')
@@ -93,7 +90,7 @@ def test_real_blender_geometry_and_textured_material(asset, tmp_path, hidden):
 open_asset({str(work)!r})
 import bpy
 obj = next(o for o in bpy.context.scene.objects if o.type == 'MESH')
-obj.data.vertices[0].co.x += .001
+obj.location.x += .001
 obj.data.update()
 bpy.context.view_layer.objects.active = obj
 obj.select_set(True)
@@ -121,13 +118,12 @@ export_asset({str(work)!r})
     output = finalize(work, tmp_path / 'final')
     stage = Usd.Stage.Open(str(output))
     original = Usd.Stage.Open(str(source))
-    prim = stage.GetPrimAtPath('/HumanBody/Anatomy/liver')
+    prim = stage.GetPrimAtPath('/HumanBody/Anatomy/aorta')
     assert UsdGeom.Imageable(prim).ComputeVisibility() == ('invisible' if hidden else 'inherited')
     old = original.GetPrimAtPath(prim.GetPath())
     delta = np.asarray(prim.GetAttribute('points').Get()) - np.asarray(old.GetAttribute('points').Get())
-    assert delta[0, 0] == pytest.approx(1., abs=1e-4)
-    np.testing.assert_allclose(delta[1:], 0, atol=1e-4)
-    assert not prim.GetAttribute('centerline:points')
+    np.testing.assert_allclose(delta, np.broadcast_to([1., 0., 0.], delta.shape), atol=1e-4)
+    assert len(prim.GetAttribute('centerline:points').Get()) > 1
     ct = '/HumanBody/Imaging/CT'
     assert stage.GetPrimAtPath(ct).GetAttribute('ct:hu').Get() == original.GetPrimAtPath(ct).GetAttribute('ct:hu').Get()
     material = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0]
