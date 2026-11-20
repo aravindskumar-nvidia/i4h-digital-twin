@@ -29,6 +29,20 @@ def open_asset(directory):
     (folder / 'opened').touch()
 
 
+def open_checkpoint(directory):
+    import bpy
+
+    folder = Path(directory)
+    settings = json.loads((folder / 'edit.json').read_text())
+    with bpy.data.libraries.load(str(folder / 'edited.blend'), link=False) as (source, loaded):
+        loaded.scenes = [settings.get('checkpoint_scene', 'I4H ' + settings['token'])]
+    scene = loaded.scenes[0]
+    if scene is None or scene.get('i4h_session') != settings['token']:
+        raise ValueError('The Blender checkpoint does not contain this editing session')
+    bpy.context.window.scene = scene
+    (folder / 'opened').touch()
+
+
 def export_asset(directory):
     import bpy
 
@@ -38,7 +52,13 @@ def export_asset(directory):
     if scene.get('i4h_session') != settings['token']:
         raise ValueError('Return to the I4H editing scene before exporting')
     # Preserve the agent result before export/validation so failed runs can be recovered.
-    bpy.ops.wm.save_as_mainfile(filepath=str(folder / 'edited.blend'), copy=True)
+    checkpoint = folder / '.edited.blend'
+    bpy.ops.wm.save_as_mainfile(filepath=str(checkpoint), copy=True)
+    checkpoint.replace(folder / 'edited.blend')
+    settings['checkpoint_scene'] = scene.name
+    metadata = folder / '.edit.json'
+    metadata.write_text(json.dumps(settings))
+    metadata.replace(folder / 'edit.json')
     meshes = [o for o in scene.objects if o.type == 'MESH']
     paths = [o.data.get('i4h_path') for o in meshes]
     if len(paths) != len(set(paths)) or set(paths) != set(settings['paths']):

@@ -16,7 +16,7 @@ from pathlib import Path
 from threading import Timer
 from typing import cast
 
-from .assets import CenterlineRegenerationError, finalize, prepare
+from .assets import CenterlineRegenerationError, finalize, load_workspace, prepare
 from .runtime import MCP_PACKAGE, blender_session
 
 BLENDER_TOOLS = ('execute_blender_code', 'get_scene_info', 'look')
@@ -44,13 +44,14 @@ async def blender_call(config: dict, function: str, workspace: Path) -> None:
     from mcp.client.stdio import stdio_client
 
     worker = Path(__file__).with_name('blender.py')
+    marker = workspace / ('edited.usdc' if function == 'export_asset' else 'opened')
+    marker.unlink(missing_ok=True)
     code = f"exec(compile(open({str(worker)!r}).read(), {str(worker)!r}, 'exec')); {function}({str(workspace)!r})"
     with (workspace / 'mcp.log').open('a') as log:
         async with stdio_client(StdioServerParameters(**config), errlog=log) as (read, write):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=120)) as client:
                 await client.initialize()
                 result = await client.call_tool('execute_blender_code', {'code': code})
-                marker = workspace / ('opened' if function == 'open_asset' else 'edited.usdc')
                 if result.isError or not marker.is_file():
                     raise RuntimeError(f'Blender {function} failed: {result.content}')
 
@@ -127,41 +128,38 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
         print()
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Optionally edit an existing pipeline output; generation itself is unchanged."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
-    parser.add_argument('--input', type=Path, required=True, help='Pipeline USD or patient_twin.yaml')
+def parser(command: str = "edit") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__, epilog='Recovery commands use finalize or resume with --workspace PATH.')
+    parser.set_defaults(command=command)
+    if command == 'edit':
+        parser.add_argument('--input', type=Path, required=True, help='Pipeline USD or patient_twin.yaml')
+    else:
+        parser.add_argument('--workspace', type=Path, required=True, help='Retained editing workspace')
     parser.add_argument('--output', type=Path, required=True, help='New final asset directory')
     parser.add_argument('--mcp-config', type=Path, help='JSON stdio server config overriding upstream uvx default')
     parser.add_argument('--blender-mode', choices=('auto', 'virtual', 'existing'),
                         help='Default: reuse/start Blender; virtual starts a private Xvfb GUI; existing never launches')
     parser.add_argument('--vessel-names', nargs='+', help='Vessels used to regenerate existing navigation arrays')
-    parser.add_argument('--model')
-    parser.add_argument('--timeout', type=float, default=600)
-    parser.add_argument('--max-turns', type=int, default=30)
-    parser.add_argument('--budget-usd', type=float, default=5)
-    parser.add_argument('prompt')
-    args = parser.parse_args(argv)
-    if args.max_turns <= 0 or not 0 < args.budget_usd < float('inf') or not 0 < args.timeout < float('inf'):
-        parser.error('max-turns, budget-usd and timeout must be positive and finite')
-    output = args.output.expanduser().resolve()
-    if output.exists():
-        parser.error('Use a new output directory')
-    output.parent.mkdir(parents=True, exist_ok=True)
-    mode = args.blender_mode or ('existing' if args.mcp_config else 'auto')
-    if args.mcp_config and mode != 'existing':
-        parser.error('--mcp-config requires --blender-mode existing')
+    if command != 'finalize':
+        parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
+        parser.add_argument('--model')
+        parser.add_argument('--timeout', type=float, default=600)
+        parser.add_argument('--max-turns', type=int, default=30)
+        parser.add_argument('--budget-usd', type=float, default=5)
+        parser.add_argument('prompt')
+    return parser
+
+
+def _run_blender(args: argparse.Namespace, workspace: Path, settings: dict) -> None:
     config = json.loads(args.mcp_config.read_text()) if args.mcp_config else mcp_config()
-    # Same host/filesystem as Blender; the temporary files never replace the input.
-    workspace = Path(tempfile.mkdtemp(prefix='.asset-edit-', dir=output.parent))
-    try:
-        settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
-        print('Connecting to Blender…', flush=True)
-        with blender_session(workspace, config, mode) as config:
-            asyncio.run(blender_call(config, 'open_asset', workspace))
+    mode = args.blender_mode or ('existing' if args.mcp_config else 'auto')
+    print('Connecting to Blender…', flush=True)
+    with blender_session(workspace, config, mode) as config:
+        asyncio.run(blender_call(config, 'open_asset' if args.command == 'edit' else 'open_checkpoint', workspace))
+        if args.command != 'finalize':
             print('Editing asset…', flush=True)
-            prompt = f"Edit scene I4H {settings['token']}.\n{args.prompt}"
+            prompt = f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}"
             if args.backend == 'claude':
                 async def bounded():
                     await asyncio.wait_for(run_claude(prompt, workspace, config, args.model,
@@ -169,18 +167,55 @@ def main(argv: list[str] | None = None) -> int:
                 asyncio.run(bounded())
             else:
                 run_codex(prompt, workspace, config, args.model, args.timeout)
-            print('Exporting edited asset…', flush=True)
-            asyncio.run(blender_call(config, 'export_asset', workspace))
-        print(finalize(workspace, output))
+        print('Exporting edited asset…', flush=True)
+        asyncio.run(blender_call(config, 'export_asset', workspace))
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Optionally edit an existing pipeline output; generation itself is unchanged."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    command = argv.pop(0) if argv and argv[0] in {'finalize', 'resume'} else 'edit'
+    cli = parser(command)
+    args = cli.parse_args(argv)
+    if command != 'finalize' and (args.max_turns <= 0 or not 0 < args.budget_usd < float('inf')
+                                  or not 0 < args.timeout < float('inf')):
+        cli.error('max-turns, budget-usd and timeout must be positive and finite')
+    output = args.output.expanduser().resolve()
+    if output.exists():
+        cli.error('Use a new output directory')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if args.mcp_config and args.blender_mode not in {None, 'existing'}:
+        cli.error('--mcp-config requires --blender-mode existing')
+    if command == 'edit':
+        workspace = Path(tempfile.mkdtemp(prefix='.asset-edit-', dir=output.parent))
+    else:
+        workspace = args.workspace.expanduser().resolve()
+    checkpoint, edited = workspace / 'edited.blend', workspace / 'edited.usdc'
+    if command != 'edit':
+        if not all((workspace / name).is_file() for name in ('edit.json', 'original.usdc')):
+            cli.error('Workspace must contain edit.json and original.usdc')
+        if not checkpoint.is_file() and (command == 'resume' or not edited.is_file()):
+            cli.error('Resume requires edited.blend. Finalize requires edited.blend or edited.usdc')
+    try:
+        if command == 'edit':
+            settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
+        else:
+            settings = load_workspace(workspace, vessel_names=args.vessel_names)
+        needs_export = (command != 'finalize' or not edited.is_file()
+                        or (checkpoint.is_file() and checkpoint.stat().st_mtime_ns > edited.stat().st_mtime_ns))
+        if needs_export:
+            _run_blender(args, workspace, settings)
+        print(finalize(workspace, output, vessel_names=settings['vessel_names']))
     except CenterlineRegenerationError as exc:
         print(f'Publication stopped. {exc}', file=sys.stderr)
-        print(f'Your Blender edits are saved at {workspace / "edited.blend"}', file=sys.stderr)
+        print(f'Saved edits are retained at {workspace}', file=sys.stderr)
         return 1
     except BaseException:
         print(f'Edit failed; recovery files retained at {workspace}', file=sys.stderr)
         raise
     else:
-        shutil.rmtree(workspace)
+        if command == 'edit':
+            shutil.rmtree(workspace)
     return 0
 
 

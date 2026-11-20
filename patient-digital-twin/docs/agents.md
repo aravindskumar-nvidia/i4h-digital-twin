@@ -33,7 +33,20 @@ existing Blender sessions and preferences are left intact. `--blender-mode exist
 disables installation/startup and is the default when using `--mcp-config`.
 
 Failed runs retain their workspace (including the pre-export `edited.blend`
-checkpoint and import/export diagnostics in `mcp.log`); the error prints its path. Successful runs remove temporary files.
+checkpoint and import/export diagnostics in `mcp.log`); the error prints its path. Successful fresh edits remove temporary files.
+
+Use a retained workspace to retry publication or continue agent editing.
+
+```bash
+patient-digital-twin-agent finalize --workspace output/.asset-edit-xxxxx --output recovered-patient
+patient-digital-twin-agent resume --workspace output/.asset-edit-xxxxx \
+  --output repaired-patient --backend codex \
+  'Repair the open aorta surface while preserving the existing edits.'
+```
+
+`finalize` uses the exported USD, re-exporting `edited.blend` if newer or if the
+USD is missing. `resume` opens that checkpoint for further agent edits. Both require
+a new output directory and the referenced source files, and retain the workspace.
 
 The returned USD or manifest is the new Isaac input; source and CT data are
 preserved. For Claude, install the `claude` extra and use `--backend claude`.

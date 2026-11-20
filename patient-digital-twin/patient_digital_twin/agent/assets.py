@@ -73,13 +73,19 @@ def prepare(source: Path, workspace: Path, *, vessel_names: list[str] | None = N
     return settings
 
 
+def load_workspace(workspace: Path, *, vessel_names: list[str] | None = None) -> dict:
+    settings = json.loads((workspace / 'edit.json').read_text())
+    settings['vessel_names'] = _navigation_vessels(settings['manifest'], vessel_names or settings.get('vessel_names'))
+    return settings
+
+
 def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = None) -> Path:
     """Merge edits into the original contract and atomically publish a new version."""
     from pxr import Usd, UsdGeom
 
-    settings = json.loads((workspace / 'edit.json').read_text())
+    settings = load_workspace(workspace, vessel_names=vessel_names)
     source, manifest = Path(settings['source']), settings['manifest']
-    vessel_names = _navigation_vessels(manifest, vessel_names or settings.get('vessel_names'))
+    vessel_names = settings['vessel_names']
     original = Usd.Stage.Open(str(workspace / 'original.usdc'))
     edited = Usd.Stage.Open(str(workspace / 'edited.usdc'))
     if not edited or UsdGeom.GetStageUpAxis(edited) != 'Z':
