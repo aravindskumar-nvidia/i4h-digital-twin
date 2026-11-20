@@ -150,7 +150,7 @@ def _merge_mesh(target, edited) -> bool:
         orientation = 'leftHanded' if orientation == 'rightHanded' else 'rightHanded'
     old_points = np.asarray(original.GetPointsAttr().Get())
     geometry_changed = (points.shape != old_points.shape
-                        or not np.allclose(points * units, old_points * units, rtol=0, atol=1e-7)
+                        or not np.allclose(points * units, old_points * units, rtol=0, atol=1e-5)
                         or not np.array_equal(faces.ravel(), original.GetFaceVertexIndicesAttr().Get())
                         or orientation != original.GetOrientationAttr().Get())
     # Replace appearance properties; leave identity, transforms and unrelated metadata intact.

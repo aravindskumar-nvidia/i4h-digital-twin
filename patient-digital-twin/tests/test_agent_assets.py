@@ -39,7 +39,7 @@ def test_commit_preserves_ct_texture_and_structure_centerline(asset, tmp_path, d
     mesh = UsdGeom.Mesh(edited.GetPrimAtPath('/HumanBody/Anatomy/aorta'))
     mesh.MakeInvisible()
     # A tiny round-off shift should count as unchanged geometry.
-    shift = Gf.Vec3f(6 if deform else 1e-6, 0, 0)
+    shift = Gf.Vec3f(6 if deform else .005, 0, 0)
     mesh.GetPointsAttr().Set([p + shift for p in mesh.GetPointsAttr().Get()])
     texture = work / 'color.png'
     texture.write_bytes(b'texture-dependency')
