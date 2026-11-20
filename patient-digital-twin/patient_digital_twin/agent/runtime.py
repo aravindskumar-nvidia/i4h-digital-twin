@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import socket
@@ -22,17 +23,37 @@ from pathlib import Path
 
 MCP_PACKAGE = 'mcp-for-blender==2.3.0'
 MCP_PROTOCOL = 16  # Protocol shipped with the pinned server/add-on.
+MCP_MIN_BLENDER_VERSION = (3, 0, 0)
 BLENDER_VERSION = '5.1.2'
 BLENDER_URL = f'https://download.blender.org/release/Blender5.1/blender-{BLENDER_VERSION}-linux-x64.tar.xz'
 BLENDER_SHA256 = 'aaccb355f50183979b698bcce7467103a76261b5fa59f4972295842662a285fb'
 
 
+def _supported_blender_version(version: str) -> bool:
+    match = re.match(r'(?:Blender )?(\d+)\.(\d+)\.(\d+)', version)
+    return bool(match and tuple(map(int, match.groups())) >= MCP_MIN_BLENDER_VERSION)
+
+
+def _checked_blender(executable: str) -> str:
+    try:
+        result = subprocess.run([executable, '--version'], capture_output=True, text=True, check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f'{executable} --version failed ({error}). '
+                           'Set BLENDER_EXECUTABLE to a working Blender installation.') from error
+    version = result.stdout.strip().split('\n', 1)[0]
+    if not _supported_blender_version(version):
+        minimum = '.'.join(map(str, MCP_MIN_BLENDER_VERSION))
+        raise RuntimeError(f'{executable}: {version!r} is incompatible with {MCP_PACKAGE}; '
+                           f'Blender {minimum}+ is required. Set BLENDER_EXECUTABLE to a compatible installation.')
+    return executable
+
+
 def ensure_blender() -> str:
-    """Use BLENDER_EXECUTABLE/PATH, otherwise cache the verified Linux x64 release."""
+    """Use compatible Blender or ask before installing the verified Linux x64 release."""
     requested = os.environ.get('BLENDER_EXECUTABLE')
     executable = shutil.which(requested or 'blender')
     if executable:
-        return executable
+        return _checked_blender(executable)
     if requested:
         raise FileNotFoundError(f'BLENDER_EXECUTABLE does not exist: {requested}')
     if platform.system() != 'Linux' or platform.machine() not in {'x86_64', 'AMD64'}:
@@ -40,7 +61,17 @@ def ensure_blender() -> str:
     cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'i4h/blender'
     destination = cache / f'blender-{BLENDER_VERSION}-linux-x64'
     if (destination / 'blender').is_file():
-        return str(destination / 'blender')
+        return _checked_blender(str(destination / 'blender'))
+    if os.environ.get('I4H_INSTALL_BLENDER') == '1':
+        answer = 'y'
+    else:
+        try:
+            answer = input(f'Download and install Blender {BLENDER_VERSION} in {cache}? [y/N] ')
+        except EOFError:
+            raise RuntimeError('Blender installation requires Y/N confirmation; no input is available. '
+                               'Set I4H_INSTALL_BLENDER=1 to approve it non-interactively.') from None
+    if answer.strip().lower() not in {'y', 'yes'}:
+        raise RuntimeError('Blender installation cancelled. Install Blender and set BLENDER_EXECUTABLE.')
     cache.mkdir(parents=True, exist_ok=True)
     print(f'Installing Blender {BLENDER_VERSION} in {cache}', file=sys.stderr, flush=True)
     with tempfile.TemporaryDirectory(prefix='.install-', dir=cache) as temp:
@@ -74,7 +105,7 @@ def ensure_blender() -> str:
             # Another installer may have published the same version first.
             if error.errno not in {errno.EEXIST, errno.ENOTEMPTY} or not (destination / 'blender').is_file():
                 raise
-    return str(destination / 'blender')
+    return _checked_blender(str(destination / 'blender'))
 
 
 def _responding(host: str, port: int) -> bool:
@@ -97,6 +128,7 @@ def _responding(host: str, port: int) -> bool:
                 info = response['result']
                 capabilities = info.get('capabilities')
                 return (response.get('status') == 'success' and info.get('protocol_version') == MCP_PROTOCOL
+                        and _supported_blender_version(str(info.get('blender_version', '')))
                         and isinstance(capabilities, list)
                         and all(name in capabilities for name in ('execute_code', 'get_scene_info')))
     except OSError:
@@ -107,16 +139,17 @@ def _responding(host: str, port: int) -> bool:
 @contextlib.contextmanager
 def blender_session(workspace: Path, config: dict, mode: str = 'auto'):
     """Yield MCP configuration; close only a Blender/Xvfb process group we launched."""
-    if mode == 'existing':
-        yield config
-        return
     host = config.get('env', {}).get('BLENDER_HOST', '127.0.0.1')
     port = int(config.get('env', {}).get('BLENDER_PORT', '9876'))
-    if mode == 'auto' and _responding(host, port):
+    if host not in {'localhost', '127.0.0.1', '::1'}:
+        # Blender reads and writes workspace paths directly, so it must share this machine's filesystem.
+        raise RuntimeError(f'BLENDER_HOST={host} is not supported; Blender must run on this machine')
+    if mode in {'auto', 'existing'} and _responding(host, port):
         yield config
         return
-    if mode == 'auto' and host not in {'localhost', '127.0.0.1', '::1'}:
-        raise RuntimeError('Cannot start Blender on a remote host; start that instance yourself')
+    if mode == 'existing':
+        raise RuntimeError(f'No compatible Blender MCP session at {host}:{port}; '
+                           f'{MCP_PACKAGE} requires add-on protocol {MCP_PROTOCOL}.')
     virtual = mode == 'virtual' or (platform.system() == 'Linux' and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')))
     prefix = []
     if virtual:

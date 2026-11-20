@@ -23,8 +23,11 @@ private virtual desktop, add `--blender-mode virtual` (Ubuntu prerequisites:
 `sudo apt install xvfb xauth`). This runs a GUI on a virtual display so viewport
 screenshots work; it is not Blender's background mode or a VNC server.
 
-If Blender is missing on Linux x86_64, the verified official 5.1.2 archive is
-installed under `$XDG_CACHE_HOME/i4h/blender` (default `~/.cache/i4h/blender`).
+Existing Blender must meet the pinned MCP's Blender 3.0+ requirement and support
+the USD options used by this workflow. If missing on Linux x86_64, installation of
+the verified official 5.1.2 archive requires Y/N confirmation, or
+`I4H_INSTALL_BLENDER=1` for non-interactive runs. It is installed under
+`$XDG_CACHE_HOME/i4h/blender` (default `~/.cache/i4h/blender`).
 Set `BLENDER_EXECUTABLE` to select an installation; other platforms need Blender
 on PATH or this override. Managed startup is tested on Linux.
 The matching MCP server/add-on is pinned to 2.3.0.
