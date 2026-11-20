@@ -32,6 +32,10 @@ Only processes started by the command are closed on completion or failure;
 existing Blender sessions and preferences are left intact. `--blender-mode existing`
 disables installation/startup and is the default when using `--mcp-config`.
 
+Scene and output validation failures are returned to the agent for up to two repair attempts.
+Use `--max-repairs N` to change this (`0` disables repairs); the conversation, remaining
+budget and timeout carry across attempts.
+
 Failed runs retain their workspace (including the pre-export `edited.blend`
 checkpoint and import/export diagnostics in `mcp.log`); the error prints its path. Successful fresh edits remove temporary files.
 

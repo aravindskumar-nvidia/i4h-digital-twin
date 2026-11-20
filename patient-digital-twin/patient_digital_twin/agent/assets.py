@@ -24,7 +24,11 @@ from ..geometry import (
 from ..scan_volume import load_artifact
 
 
-class CenterlineRegenerationError(ValueError):
+class AssetValidationError(ValueError):
+    """The edited asset needs repair before it can be published."""
+
+
+class CenterlineRegenerationError(AssetValidationError):
     """An edited surface could not produce its required USD centerline."""
 
 
@@ -91,8 +95,10 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
     settings = load_workspace(workspace, vessel_names=vessel_names)
     source, manifest = Path(settings['source']), settings['manifest']
     vessel_names = settings['vessel_names']
-    original = Usd.Stage.Open(str(workspace / 'original.usdc'))
+    original = Usd.Stage.Open(Usd.Stage.Open(str(workspace / 'original.usdc')).Flatten())
     edited = Usd.Stage.Open(str(workspace / 'edited.usdc'))
+    if edited:
+        edited.Reload()
     if not edited or UsdGeom.GetStageUpAxis(edited) != 'Z':
         raise ValueError('Expected a Z-up Blender USD export')
     meshes = [p for p in edited.Traverse() if p.IsA(UsdGeom.Mesh)]
