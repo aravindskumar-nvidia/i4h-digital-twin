@@ -9,7 +9,15 @@ import contextlib
 import json
 import os
 import tempfile
+from datetime import timedelta
 from pathlib import Path
+from threading import Timer
+from typing import cast
+
+from .assets import finalize, prepare
+
+BLENDER_TOOLS = ('execute_blender_code', 'get_scene_info', 'get_object_info', 'get_viewport_screenshot')
+DEFAULT_CODEX_TOKEN_BUDGET = 100_000
 
 INSTRUCTIONS = """Edit the supplied I4H scene using Blender MCP. Inspect the scene and a
 viewport screenshot before and after changes. Only edit this session's scene.
@@ -19,6 +27,8 @@ UVs and USD Preview Surface compatible materials/textures are supported. Use
 Principled BSDF and image textures; bake unsupported procedural shaders first.
 Do not change scene units. Leave Object Mode active when finished. Do not export
 or modify source files: the application validates and publishes the result.
+Before finishing, run the supplied check_asset command through execute_blender_code.
+Fix any reported scene errors and check again before finishing.
 """
 
 
@@ -30,33 +40,31 @@ def mcp_config() -> dict:
 
 
 async def blender_call(config: dict, function: str, workspace: Path) -> None:
-    from datetime import timedelta
-
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     worker = Path(__file__).with_name('blender.py')
+    marker = workspace / ('edited.usdc' if function == 'export_asset' else 'opened')
+    marker.unlink(missing_ok=True)
     code = f"exec(compile(open({str(worker)!r}).read(), {str(worker)!r}, 'exec')); {function}({str(workspace)!r})"
-    async with stdio_client(StdioServerParameters(**config)) as (read, write):
-        async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=120)) as client:
-            await client.initialize()
-            result = await client.call_tool('execute_blender_code', {'code': code})
-            marker = workspace / ('opened' if function == 'open_asset' else 'edited.usdc')
-            if result.isError or not marker.is_file():
-                raise RuntimeError(f'Blender {function} failed: {result.content}')
+    with (workspace / 'mcp.log').open('a') as log:
+        async with stdio_client(StdioServerParameters(**config), errlog=log) as (read, write):
+            async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=120)) as client:
+                await client.initialize()
+                result = await client.call_tool('execute_blender_code', {'code': code})
+                if result.isError or not marker.is_file():
+                    raise RuntimeError(f'Blender {function} failed: {result.content}')
 
 
 async def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
                      max_turns: int, budget_usd: float) -> None:
     """Stream a bounded Claude Agent SDK session using its normal authentication."""
-    from typing import cast
-
     from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
     from claude_agent_sdk.types import McpStdioServerConfig
 
     options = ClaudeAgentOptions(
         cwd=str(workspace), system_prompt=INSTRUCTIONS, model=model,
-        tools=[], allowed_tools=["mcp__blender__" + name for name in ("execute_blender_code", "get_scene_info", "get_object_info", "get_viewport_screenshot")], mcp_servers={"blender": cast(McpStdioServerConfig, config)},
+        tools=[], allowed_tools=["mcp__blender__" + name for name in BLENDER_TOOLS], mcp_servers={"blender": cast(McpStdioServerConfig, config)},
         setting_sources=[], max_turns=max_turns, max_budget_usd=budget_usd,
     )
     finished = False
@@ -72,13 +80,17 @@ async def run_claude(prompt: str, workspace: Path, config: dict, model: str | No
         raise RuntimeError("Claude session ended without a result")
 
 
-def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600) -> None:
+def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600,
+              token_budget: int = DEFAULT_CODEX_TOKEN_BUDGET) -> None:
     """Stream the Codex Python SDK; credentials/config remain owned by Codex."""
-    from threading import Timer
-
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
     overrides = (
+        'features.rollout_budget.enabled=true',
+        f'features.rollout_budget.limit_tokens={token_budget}',
+        'features.rollout_budget.reminder_at_remaining_tokens=[]',
+        'features.rollout_budget.prefill_token_weight=1.0',
+        'features.rollout_budget.sampling_token_weight=1.0',
         f'mcp_servers.blender.command={json.dumps(config["command"])}',
         f'mcp_servers.blender.args={json.dumps(config["args"])}',
         *(f'mcp_servers.blender.env.{key}={json.dumps(value)}' for key, value in config.get('env', {}).items()),
@@ -86,9 +98,8 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
     # These are the capabilities exposed by this application (the same set
     # Claude permits through allowed_tools). Do not change user/global policy
     # or grant access to unrelated MCP servers or future unlisted tools.
-    blender_tools = ('execute_blender_code', 'get_scene_info', 'get_object_info', 'get_viewport_screenshot')
-    overrides += (f'mcp_servers.blender.enabled_tools={json.dumps(blender_tools)}',)
-    overrides += tuple(f'mcp_servers.blender.tools.{name}.approval_mode="approve"' for name in blender_tools)
+    overrides += (f'mcp_servers.blender.enabled_tools={json.dumps(BLENDER_TOOLS)}',)
+    overrides += tuple(f'mcp_servers.blender.tools.{name}.approval_mode="approve"' for name in BLENDER_TOOLS)
     with Codex(config=CodexConfig(cwd=str(workspace), config_overrides=overrides)) as codex:
         thread = codex.thread_start(cwd=str(workspace), model=model,
                                     developer_instructions=INSTRUCTIONS,
@@ -111,7 +122,8 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
                     result = getattr(params, "turn", None)
                     status = getattr(result, "status", None)
                     if getattr(status, "value", status) != "completed":
-                        raise RuntimeError(f"Codex turn ended: {status}")
+                        error = getattr(result, "error", None)
+                        raise RuntimeError(error.message if error else f"Codex turn ended: {status}")
                     completed = True
         except BaseException:
             interrupt()
@@ -125,8 +137,6 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
 
 def main(argv: list[str] | None = None) -> int:
     """Optionally edit an existing pipeline output; generation itself is unchanged."""
-    from .assets import finalize, prepare
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
     parser.add_argument('--input', type=Path, required=True, help='Pipeline USD or patient_twin.yaml')
@@ -135,12 +145,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--vessel-names', nargs='+', help='Vessels used to regenerate existing navigation arrays')
     parser.add_argument('--model')
     parser.add_argument('--timeout', type=float, default=600)
-    parser.add_argument('--max-turns', type=int, default=30)
-    parser.add_argument('--budget-usd', type=float, default=5)
+    parser.add_argument('--max-turns', type=int, help='Claude turn limit, default 30')
+    parser.add_argument('--budget-usd', type=float, help='Claude dollar budget, default 5')
+    parser.add_argument('--token-budget', type=int, help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
     parser.add_argument('prompt')
     args = parser.parse_args(argv)
-    if args.max_turns <= 0 or not 0 < args.budget_usd < float('inf') or not 0 < args.timeout < float('inf'):
-        parser.error('max-turns, budget-usd and timeout must be positive and finite')
+    if args.backend == 'codex' and (args.max_turns is not None or args.budget_usd is not None):
+        parser.error('Codex uses --token-budget. --max-turns and --budget-usd apply only to Claude')
+    if args.backend == 'claude' and args.token_budget is not None:
+        parser.error('--token-budget applies only to Codex')
+    for value in (args.timeout, args.max_turns, args.budget_usd, args.token_budget):
+        if value is not None and not 0 < value < float('inf'):
+            parser.error('Session limits must be positive and finite')
     output = args.output.expanduser().resolve()
     if output.exists():
         parser.error('Use a new output directory')
@@ -149,18 +165,21 @@ def main(argv: list[str] | None = None) -> int:
     # Same host/filesystem as Blender; the temporary files never replace the input.
     with tempfile.TemporaryDirectory(prefix='.asset-edit-', dir=output.parent) as temp:
         workspace = Path(temp)
-        settings = prepare(args.input, workspace)
+        settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
         asyncio.run(blender_call(config, 'open_asset', workspace))
-        prompt = f"Edit scene I4H {settings['token']}.\n{args.prompt}"
+        worker = str(Path(__file__).with_name('blender.py'))
+        prompt = (f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}\n"
+                  f"Scene check: exec(compile(open({worker!r}).read(), {worker!r}, 'exec')); "
+                  f"check_asset({str(workspace)!r})")
         if args.backend == 'claude':
             async def bounded():
                 await asyncio.wait_for(run_claude(prompt, workspace, config, args.model,
-                                                 args.max_turns, args.budget_usd), args.timeout)
+                                                 args.max_turns or 30, args.budget_usd or 5), args.timeout)
             asyncio.run(bounded())
         else:
-            run_codex(prompt, workspace, config, args.model, args.timeout)
+            run_codex(prompt, workspace, config, args.model, args.timeout, args.token_budget or DEFAULT_CODEX_TOKEN_BUDGET)
         asyncio.run(blender_call(config, 'export_asset', workspace))
-        print(finalize(workspace, output, vessel_names=args.vessel_names))
+        print(finalize(workspace, output, vessel_names=settings['vessel_names']))
     return 0
 
 
