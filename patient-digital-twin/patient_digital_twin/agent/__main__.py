@@ -20,6 +20,7 @@ from .assets import CenterlineRegenerationError, finalize, load_workspace, prepa
 from .runtime import MCP_PACKAGE, blender_session
 
 BLENDER_TOOLS = ('execute_blender_code', 'get_scene_info', 'look')
+DEFAULT_CODEX_TOKEN_BUDGET = 100_000
 
 INSTRUCTIONS = """Edit the supplied I4H scene using Blender MCP. Inspect the scene and a
 viewport screenshot before and after changes (use look for images). Only edit this session's scene.
@@ -80,11 +81,17 @@ async def run_claude(prompt: str, workspace: Path, config: dict, model: str | No
         raise RuntimeError("Claude session ended without a result")
 
 
-def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600) -> None:
+def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600,
+              token_budget: int = DEFAULT_CODEX_TOKEN_BUDGET) -> None:
     """Stream the Codex Python SDK; credentials/config remain owned by Codex."""
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
     overrides = (
+        'features.rollout_budget.enabled=true',
+        f'features.rollout_budget.limit_tokens={token_budget}',
+        'features.rollout_budget.reminder_at_remaining_tokens=[]',
+        'features.rollout_budget.prefill_token_weight=1.0',
+        'features.rollout_budget.sampling_token_weight=1.0',
         f'mcp_servers.blender.command={json.dumps(config["command"])}',
         f'mcp_servers.blender.args={json.dumps(config["args"])}',
         *(f'mcp_servers.blender.env.{key}={json.dumps(value)}' for key, value in config.get('env', {}).items()),
@@ -116,7 +123,8 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
                     result = getattr(params, "turn", None)
                     status = getattr(result, "status", None)
                     if getattr(status, "value", status) != "completed":
-                        raise RuntimeError(f"Codex turn ended: {status}")
+                        error = getattr(result, "error", None)
+                        raise RuntimeError(error.message if error else f"Codex turn ended: {status}")
                     completed = True
         except BaseException:
             interrupt()
@@ -145,8 +153,10 @@ def parser(command: str = "edit") -> argparse.ArgumentParser:
         parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
         parser.add_argument('--model')
         parser.add_argument('--timeout', type=float, default=600)
-        parser.add_argument('--max-turns', type=int, default=30)
-        parser.add_argument('--budget-usd', type=float, default=5)
+        parser.add_argument('--max-turns', type=int, help='Claude turn limit, default 30')
+        parser.add_argument('--budget-usd', type=float, help='Claude dollar budget, default 5')
+        parser.add_argument('--token-budget', type=int,
+                            help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
         parser.add_argument('prompt')
     return parser
 
@@ -157,16 +167,22 @@ def _run_blender(args: argparse.Namespace, workspace: Path, settings: dict) -> N
     print('Connecting to Blender…', flush=True)
     with blender_session(workspace, config, mode) as config:
         asyncio.run(blender_call(config, 'open_asset' if args.command == 'edit' else 'open_checkpoint', workspace))
-        if args.command != 'finalize':
-            print('Editing asset…', flush=True)
-            prompt = f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}"
-            if args.backend == 'claude':
-                async def bounded():
-                    await asyncio.wait_for(run_claude(prompt, workspace, config, args.model,
-                                                     args.max_turns, args.budget_usd), args.timeout)
-                asyncio.run(bounded())
-            else:
-                run_codex(prompt, workspace, config, args.model, args.timeout)
+        try:
+            if args.command != 'finalize':
+                print('Editing asset…', flush=True)
+                prompt = f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}"
+                if args.backend == 'claude':
+                    async def bounded():
+                        await asyncio.wait_for(run_claude(prompt, workspace, config, args.model,
+                                                         args.max_turns or 30, args.budget_usd or 5), args.timeout)
+                    asyncio.run(bounded())
+                else:
+                    run_codex(prompt, workspace, config, args.model, args.timeout,
+                              args.token_budget or DEFAULT_CODEX_TOKEN_BUDGET)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                asyncio.run(blender_call(config, 'export_asset', workspace))
+            raise
         print('Exporting edited asset…', flush=True)
         asyncio.run(blender_call(config, 'export_asset', workspace))
 
@@ -177,9 +193,14 @@ def main(argv: list[str] | None = None) -> int:
     command = argv.pop(0) if argv and argv[0] in {'finalize', 'resume'} else 'edit'
     cli = parser(command)
     args = cli.parse_args(argv)
-    if command != 'finalize' and (args.max_turns <= 0 or not 0 < args.budget_usd < float('inf')
-                                  or not 0 < args.timeout < float('inf')):
-        cli.error('max-turns, budget-usd and timeout must be positive and finite')
+    if command != 'finalize':
+        if args.backend == 'codex' and (args.max_turns is not None or args.budget_usd is not None):
+            cli.error('Codex uses --token-budget. --max-turns and --budget-usd apply only to Claude')
+        if args.backend == 'claude' and args.token_budget is not None:
+            cli.error('--token-budget applies only to Codex')
+        for value in (args.timeout, args.max_turns, args.budget_usd, args.token_budget):
+            if value is not None and not 0 < value < float('inf'):
+                cli.error('Session limits must be positive and finite')
     output = args.output.expanduser().resolve()
     if output.exists():
         cli.error('Use a new output directory')

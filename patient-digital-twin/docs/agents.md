@@ -56,3 +56,9 @@ Navigation uses the vessel selection saved in the bundle. Older bundles select
 their sole vessel automatically. For older bundles with several vessels, pass
 `--vessel-names aorta ...`. Selection is checked before Blender starts.
 Use `--help` for session options.
+
+Codex uses `--token-budget` (default 100000) through its native experimental
+rollout budget. It uses provider budget units when reported, otherwise uncached
+input plus output tokens. Budget checks follow model responses, so usage can
+exceed the threshold. `--max-turns` (default 30) and `--budget-usd` (default 5)
+apply only to Claude. `--timeout` applies to both backends.
