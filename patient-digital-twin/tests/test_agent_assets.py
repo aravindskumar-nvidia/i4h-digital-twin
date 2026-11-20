@@ -49,6 +49,14 @@ def test_commit_preserves_ct_texture_and_structure_centerline(asset, tmp_path, d
     shader.CreateInput('file', Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(str(texture)))
     edited.Export(str(work / 'edited.usdc'))
     before = source.read_bytes()
+    snapshot = Usd.Stage.Open(str(work / 'original.usdc'))
+    baseline = snapshot.GetRootLayer().ExportToString()
+    texture.unlink()
+    with pytest.raises(ValueError, match='Unresolved texture'):
+        finalize(work, tmp_path / 'failed')
+    assert not (tmp_path / 'failed').exists()
+    assert snapshot.GetRootLayer().ExportToString() == baseline
+    texture.write_bytes(b'texture-dependency')
     output = finalize(work, tmp_path / 'final')
     assert source.read_bytes() == before
     stage = Usd.Stage.Open(str(output))
@@ -100,7 +108,11 @@ def test_recovery_reuses_saved_edit(asset, tmp_path, monkeypatch, saved):
 
     monkeypatch.setattr(cli, 'blender_call', blender_call)
     monkeypatch.setattr(cli, 'blender_session', lambda *args: nullcontext({}))
-    monkeypatch.setattr(cli, 'run_codex', lambda *args: calls.append('agent'))
+    def run_codex(*args, publish, **kwargs):
+        calls.append('agent')
+        publish()
+
+    monkeypatch.setattr(cli, 'run_codex', run_codex)
     command = ['resume' if saved == 'resume' else 'finalize',
                '--workspace', str(work), '--output', str(tmp_path / 'final')]
     if saved == 'resume':
