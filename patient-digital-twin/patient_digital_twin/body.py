@@ -34,6 +34,17 @@ from .geometry import CenterlineGraph, extract_centerlines, rigid_transform
 from .scan_volume import ScanVolume, from_array
 
 
+def _extract_mesh_centerline(
+    vertices: np.ndarray, faces: np.ndarray, spacing_m: float = 0.0015
+) -> CenterlineGraph:
+    origin = vertices.min(0) - 2 * spacing_m
+    shape = np.ceil((vertices.max(0) - origin) / spacing_m).astype(int) + 3
+    return extract_centerlines(
+        vertices, faces, shape_zyx=(int(shape[2]), int(shape[1]), int(shape[0])),
+        spacing_zyx_m=(spacing_m,) * 3, origin_xyz_m=origin,
+    )
+
+
 @dataclass(frozen=True)
 class ImagingVolume:
     """An attached native HU scan plus the rigid body-to-RAS-meter registration of the anatomy.
@@ -185,13 +196,8 @@ class HumanBody:
             tubular = is_vessel(name, structure.kind) or structure.kind == Kind.AIRWAY
             if name not in selected or not tubular or vertices is None or faces is None:
                 continue
-            origin = vertices.min(0) - 2 * spacing_m
-            shape = np.ceil((vertices.max(0) - origin) / spacing_m).astype(int) + 3
             try:
-                results[name] = extract_centerlines(
-                    vertices, faces, shape_zyx=(int(shape[2]), int(shape[1]), int(shape[0])),
-                    spacing_zyx_m=(spacing_m,) * 3, origin_xyz_m=origin,
-                )
+                results[name] = _extract_mesh_centerline(vertices, faces, spacing_m=spacing_m)
             except ImportError:
                 raise
             except Exception as exc:
