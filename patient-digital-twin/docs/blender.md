@@ -24,10 +24,13 @@ result = finalize(workspace, Path("output/edited-patient").resolve())
 print(result)  # Use this USD or patient_twin.yaml in Isaac.
 ```
 
-The output directory must be new. Only manifest-listed bundle files and required
-textures are published; source files, CT data and original prim identities are
-preserved. Navigation bundles require `vessel_names=["aorta", ...]` when geometry
-changes, using the original vessel selection to regenerate masks and centerlines.
+The output directory must be new. Manifest-listed bundle files, an updated
+`human_body.usdc` when present, and required textures are published; source files, CT data and original prim identities are
+preserved. Geometry edits regenerate existing USD centerlines using grid spacing
+estimated from the original graph. If extraction fails, publication stops and the edit files stay in
+the workspace. Navigation uses the bundle's saved vessel selection. For older
+bundles with several vessels, pass `vessel_names=["aorta", ...]` to `prepare()`.
+The selection is validated before editing and reused by `finalize()`.
 
 Supported: existing meshes, transforms, UVs and USD Preview Surface materials/image
 textures. Add/delete/split/join, rigs and animation are unsupported.

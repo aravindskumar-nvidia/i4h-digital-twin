@@ -33,11 +33,32 @@ existing Blender sessions and preferences are left intact. `--blender-mode exist
 disables installation/startup and is the default when using `--mcp-config`.
 
 Failed runs retain their workspace (including the pre-export `edited.blend`
-checkpoint and import/export diagnostics in `mcp.log`); the error prints its path. Successful runs remove temporary files.
+checkpoint and import/export diagnostics in `mcp.log`); the error prints its path. Successful fresh edits remove temporary files.
+
+Use a retained workspace to retry publication or continue agent editing.
+
+```bash
+patient-digital-twin-agent finalize --workspace output/.asset-edit-xxxxx --output recovered-patient
+patient-digital-twin-agent resume --workspace output/.asset-edit-xxxxx \
+  --output repaired-patient --backend codex \
+  'Repair the open aorta surface while preserving the existing edits.'
+```
+
+`finalize` uses the exported USD, re-exporting `edited.blend` if newer or if the
+USD is missing. `resume` opens that checkpoint for further agent edits. Both require
+a new output directory and the referenced source files, and retain the workspace.
 
 The returned USD or manifest is the new Isaac input; source and CT data are
 preserved. For Claude, install the `claude` extra and use `--backend claude`.
 
 See [Blender asset editing](blender.md) for supported edits and the output contract.
-For geometry edits to navigation bundles, pass `--vessel-names aorta ...` with
-the original vessel selection. Use `--help` for session limits and MCP configuration.
+Navigation uses the vessel selection saved in the bundle. Older bundles select
+their sole vessel automatically. For older bundles with several vessels, pass
+`--vessel-names aorta ...`. Selection is checked before Blender starts.
+Use `--help` for session options.
+
+Codex uses `--token-budget` (default 100000) through its native experimental
+rollout budget. It uses provider budget units when reported, otherwise uncached
+input plus output tokens. Budget checks follow model responses, so usage can
+exceed the threshold. `--max-turns` (default 30) and `--budget-usd` (default 5)
+apply only to Claude. `--timeout` applies to both backends.

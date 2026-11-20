@@ -29,6 +29,38 @@ def open_asset(directory):
     (folder / 'opened').touch()
 
 
+def open_checkpoint(directory):
+    import bpy
+
+    folder = Path(directory)
+    settings = json.loads((folder / 'edit.json').read_text())
+    with bpy.data.libraries.load(str(folder / 'edited.blend'), link=False) as (source, loaded):
+        loaded.scenes = [settings.get('checkpoint_scene', 'I4H ' + settings['token'])]
+    scene = loaded.scenes[0]
+    if scene is None or scene.get('i4h_session') != settings['token']:
+        raise ValueError('The Blender checkpoint does not contain this editing session')
+    bpy.context.window.scene = scene
+    (folder / 'opened').touch()
+
+
+def check_asset(directory):
+    import bpy
+
+    settings = json.loads((Path(directory) / 'edit.json').read_text())
+    scene = bpy.context.scene
+    if scene.get('i4h_session') != settings['token']:
+        raise ValueError('Return to the I4H editing scene before exporting')
+    meshes = [o for o in scene.objects if o.type == 'MESH']
+    paths = [o.data.get('i4h_path') for o in meshes]
+    if len(paths) != len(set(paths)) or set(paths) != set(settings['paths']):
+        raise ValueError('Keep the existing meshes and their i4h_path identity; add/delete/split/join is unsupported')
+    if any(o.mode != 'OBJECT' for o in meshes):
+        raise ValueError('Leave Edit Mode before exporting')
+    if any(o.type not in {'MESH', 'EMPTY', 'LIGHT', 'CAMERA'} for o in scene.objects):
+        raise ValueError('Only mesh edits, materials and textures are supported')
+    return meshes
+
+
 def export_asset(directory):
     import bpy
 
@@ -38,18 +70,16 @@ def export_asset(directory):
     if scene.get('i4h_session') != settings['token']:
         raise ValueError('Return to the I4H editing scene before exporting')
     # Preserve the agent result before export/validation so failed runs can be recovered.
-    bpy.ops.wm.save_as_mainfile(filepath=str(folder / 'edited.blend'), copy=True)
-    meshes = [o for o in scene.objects if o.type == 'MESH']
-    paths = [o.data.get('i4h_path') for o in meshes]
-    if len(paths) != len(set(paths)) or set(paths) != set(settings['paths']):
-        raise ValueError('Keep the existing meshes and their i4h_path identity; add/delete/split/join is unsupported')
-    if any(o.mode != 'OBJECT' for o in meshes):
-        raise ValueError('Leave Edit Mode before exporting')
-    if any(o.type not in {'MESH', 'EMPTY', 'LIGHT', 'CAMERA'} for o in scene.objects):
-        raise ValueError('Only mesh edits, materials and textures are supported')
+    checkpoint = folder / '.edited.blend'
+    bpy.ops.wm.save_as_mainfile(filepath=str(checkpoint), copy=True)
+    checkpoint.replace(folder / 'edited.blend')
+    settings['checkpoint_scene'] = scene.name
+    metadata = folder / '.edit.json'
+    metadata.write_text(json.dumps(settings))
+    metadata.replace(folder / 'edit.json')
+    meshes = check_asset(directory)
     for obj in meshes:
         obj['i4h_path'] = obj.data['i4h_path']
-        obj['i4h_hidden'] = obj.hide_render or not obj.visible_get()
     with _export_all_meshes(scene):
         bpy.ops.wm.usd_export(filepath=str(folder / 'edited.usdc'), export_animation=False,
                               export_materials=True, generate_preview_surface=True,
@@ -61,7 +91,7 @@ def export_asset(directory):
 
 @contextlib.contextmanager
 def _export_all_meshes(scene):
-    """USD omits hidden geometry; reveal it temporarily and carry visibility as metadata."""
+    """Reveal all meshes temporarily so USD export includes hidden geometry."""
     import bpy
 
     saved, hidden = [], []
