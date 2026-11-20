@@ -12,10 +12,34 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
-from ..geometry import transform_points, validate_triangles
+from ..anatomy import Kind, is_vessel
+from ..body import _extract_mesh_centerline
+from ..export import _publish
+from ..geometry import native_centerline, transform_points, validate_triangles, voxelize_mesh
+from ..scan_volume import load_artifact
 
 
-def prepare(source: Path, workspace: Path) -> dict:
+class CenterlineRegenerationError(ValueError):
+    """An edited surface could not produce its required USD centerline."""
+
+
+def _navigation_vessels(manifest, names):
+    if manifest is None or 'vessel_mask' not in manifest['artifacts']:
+        return []
+    vessels = {name: item for name, item in manifest['anatomy']['structures'].items()
+               if is_vessel(name, Kind(item['kind']))}
+    names = names or manifest.get('navigation', {}).get('vessel_names')
+    if not names:
+        if len(vessels) != 1:
+            raise ValueError('Supply --vessel-names with the original navigation selection. '
+                             f'Available vessels: {", ".join(vessels)}')
+        names = list(vessels)
+    if invalid := [name for name in names if name not in vessels or not vessels[name]['enabled']]:
+        raise ValueError(f'Unknown, disabled, or non-vessel navigation structures: {invalid}')
+    return names
+
+
+def prepare(source: Path, workspace: Path, *, vessel_names: list[str] | None = None) -> dict:
     """Snapshot a standalone USD or schema-2 bundle; hand only scene content to Blender."""
     from pxr import Sdf, Usd, UsdGeom
 
@@ -31,12 +55,14 @@ def prepare(source: Path, workspace: Path) -> dict:
         raise ValueError('Expected a pipeline patient USD with default prim /HumanBody')
     if UsdGeom.GetStageUpAxis(stage) != 'Z':
         raise ValueError('Expected pipeline Z-up geometry')
+    vessel_names = _navigation_vessels(manifest, vessel_names)
     workspace.mkdir(parents=True, exist_ok=True)
     stage.Flatten().Export(str(workspace / 'original.usdc'))
     paths = [str(p.GetPath()) for p in stage.Traverse() if p.IsA(UsdGeom.Mesh)]
     if not paths:
         raise ValueError('The asset has no meshes')
-    settings = dict(source=str(source), usd=str(usd), manifest=manifest, paths=paths, token=uuid4().hex)
+    settings = dict(source=str(source), usd=str(usd), manifest=manifest, paths=paths,
+                    token=uuid4().hex, vessel_names=vessel_names)
     (workspace / 'edit.json').write_text(json.dumps(settings))
     handoff = Usd.Stage.Open(str(workspace / 'original.usdc'))
     handoff.RemovePrim('/HumanBody/Imaging')
@@ -47,14 +73,14 @@ def prepare(source: Path, workspace: Path) -> dict:
     return settings
 
 
+
 def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = None) -> Path:
     """Merge edits into the original contract and atomically publish a new version."""
     from pxr import Usd, UsdGeom
 
-    from ..export import _publish
-
     settings = json.loads((workspace / 'edit.json').read_text())
     source, manifest = Path(settings['source']), settings['manifest']
+    vessel_names = _navigation_vessels(manifest, vessel_names or settings.get('vessel_names'))
     original = Usd.Stage.Open(str(workspace / 'original.usdc'))
     edited = Usd.Stage.Open(str(workspace / 'edited.usdc'))
     if not edited or UsdGeom.GetStageUpAxis(edited) != 'Z':
@@ -83,13 +109,21 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
                 if key != 'anatomy_usd':
                     shutil.copy2(source.parent / relative, destination)
             target = folder / manifest['artifacts']['anatomy_usd']
-            for item in manifest['anatomy']['structures'].values():
-                item['enabled'] = UsdGeom.Imageable(original.GetPrimAtPath(item['prim_path'])).ComputeVisibility() != 'invisible'
-            if any(changed) and 'vessel_mask' in manifest['artifacts']:
-                if not vessel_names:
-                    raise ValueError('Geometry/visibility changed: supply vessel_names to regenerate navigation artifacts')
-                _navigation(original, manifest, folder, vessel_names)
+            if 'vessel_mask' in manifest['artifacts']:
+                previous = manifest.get('navigation', {}).get('vessel_names', vessel_names)
+                if any(changed) or previous != vessel_names:
+                    _navigation(original, manifest, folder, vessel_names)
+                manifest.setdefault('navigation', {})['vessel_names'] = vessel_names
             (folder / 'patient_twin.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+            companion = source.parent / 'human_body.usdc'
+            if companion.is_file():
+                standalone = Usd.Stage.Open(Usd.Stage.Open(str(companion)).Flatten())
+                pairs = [(mesh, path) for mesh, path in zip(meshes, paths) if standalone.GetPrimAtPath(path)]
+                for _, path in pairs:
+                    _merge_mesh(standalone.GetPrimAtPath(path), original.GetPrimAtPath(path), local=True)
+                _merge_materials(standalone, edited, [m for m, _ in pairs], [p for _, p in pairs], settings['token'])
+                _copy_textures(standalone, workspace, folder)
+                standalone.Export(str(folder / companion.name))
         _copy_textures(original, workspace, target.parent)
         original.Export(str(target))
         reopened = Usd.Stage.Open(str(target))
@@ -100,7 +134,7 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
     return result / ('patient_twin.yaml' if manifest is not None else source.name)
 
 
-def _merge_mesh(target, edited) -> bool:
+def _merge_mesh(target, edited, *, local=False) -> bool:
     """Keep original geometry exactly when only appearance changed."""
     from pxr import Gf, Sdf, UsdGeom, Vt
 
@@ -109,7 +143,8 @@ def _merge_mesh(target, edited) -> bool:
     units = UsdGeom.GetStageMetersPerUnit(stage)
     scale = Gf.Matrix4d().SetScale(UsdGeom.GetStageMetersPerUnit(source) / units)
     cache = UsdGeom.XformCache()
-    matrix = cache.GetLocalToWorldTransform(edited) * scale * cache.GetLocalToWorldTransform(target).GetInverse()
+    matrix = scale if local else (cache.GetLocalToWorldTransform(edited) * scale
+                                  * cache.GetLocalToWorldTransform(target).GetInverse())
     if not np.all(np.asarray(mesh.GetFaceVertexCountsAttr().Get()) == 3):
         raise ValueError('Export triangulated meshes from Blender')
     points, faces = validate_triangles(
@@ -120,19 +155,32 @@ def _merge_mesh(target, edited) -> bool:
         orientation = 'leftHanded' if orientation == 'rightHanded' else 'rightHanded'
     old_points = np.asarray(original.GetPointsAttr().Get())
     geometry_changed = (points.shape != old_points.shape
-                        or not np.allclose(points * units, old_points * units, rtol=0, atol=1e-7)
+                        or not np.allclose(points * units, old_points * units, rtol=0, atol=1e-5)
                         or not np.array_equal(faces.ravel(), original.GetFaceVertexIndicesAttr().Get())
                         or orientation != original.GetOrientationAttr().Get())
-    visible = UsdGeom.Imageable(edited).ComputeVisibility()
-    visibility_changed = visible != UsdGeom.Imageable(target).ComputeVisibility()
     # Replace appearance properties; leave identity, transforms and unrelated metadata intact.
     names = {p.GetName() for prim in (target, edited) for p in prim.GetAuthoredProperties()
              if p.GetName().startswith(('primvars:', 'material:binding'))}
     if geometry_changed:
         names.update(set(UsdGeom.Mesh.GetSchemaAttributeNames()) - {'xformOpOrder', 'visibility', 'purpose'})
-        for attr in target.GetAttributes():
-            if attr.GetName().startswith('centerline:'):
-                target.RemoveProperty(attr.GetName())
+        points = points.astype(np.float32)
+        if target.HasAttribute('centerline:points'):
+            try:
+                old_graph = np.asarray(target.GetAttribute('centerline:points').Get())
+                edges = np.asarray(target.GetAttribute('centerline:edges').Get())
+                # Pipeline graphs connect 26-neighbor voxels on a local isotropic grid.
+                steps = old_graph[edges[:, 1]] - old_graph[edges[:, 0]]
+                spacing_m = float(np.median(np.max(np.abs(steps), axis=1))) * units
+                if not np.isfinite(spacing_m) or spacing_m <= 0:
+                    raise ValueError('Original centerline has invalid grid spacing')
+                graph = _extract_mesh_centerline(points.astype(float) * units, faces, spacing_m)
+            except ValueError as exc:
+                raise CenterlineRegenerationError(
+                    f'Cannot regenerate the USD centerline for {target.GetPath()}. {exc}'
+                ) from exc
+            target.GetAttribute('centerline:points').Set(Vt.Vec3fArray.FromNumpy((graph.points / units).astype(np.float32)))
+            target.GetAttribute('centerline:edges').Set(Vt.Vec2iArray.FromNumpy(graph.edges.astype(np.int32)))
+            target.GetAttribute('centerline:radii').Set(Vt.FloatArray.FromNumpy((graph.radii / units).astype(np.float32)))
     for name in names:
         target.RemoveProperty(name)
         prop = edited.GetProperty(name)
@@ -144,17 +192,16 @@ def _merge_mesh(target, edited) -> bool:
             normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-30)
             attr.Set(Vt.Vec3fArray.FromNumpy(normals.astype(np.float32)))
     if geometry_changed:
-        original.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(points.astype(np.float32)))
+        original.GetPointsAttr().Set(Vt.Vec3fArray.FromNumpy(points))
         original.CreateExtentAttr(UsdGeom.PointBased.ComputeExtent(original.GetPointsAttr().Get()))
         original.CreateOrientationAttr(orientation)
-    original.CreateVisibilityAttr(visible)
     for child in target.GetChildren():
         if child.IsA(UsdGeom.Subset):
             stage.RemovePrim(child.GetPath())
     for child in edited.GetChildren():
         if child.IsA(UsdGeom.Subset):
             Sdf.CopySpec(source.GetRootLayer(), child.GetPath(), stage.GetRootLayer(), target.GetPath().AppendChild(child.GetName()))
-    return geometry_changed or visibility_changed
+    return geometry_changed
 
 
 def _merge_materials(original, edited, meshes, paths, token):
@@ -206,9 +253,6 @@ def _copy_textures(stage, workspace, destination):
 def _navigation(stage, manifest, folder, names):
     """Reuse existing voxelization/centerline code; never retain stale navigation arrays."""
     from pxr import UsdGeom
-
-    from ..geometry import native_centerline, voxelize_mesh
-    from ..scan_volume import load_artifact
 
     artifacts = manifest['artifacts']
     scan = load_artifact(folder / artifacts['volume_metadata'])

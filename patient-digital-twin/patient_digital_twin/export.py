@@ -352,6 +352,8 @@ def export_patient_twin(
             "transforms": {} if scan is None else {"voxel_to_scan": scan.ijk_to_world.tolist()},
             "artifacts": artifacts,
         }
+        if mask is not None:
+            manifest["navigation"] = {"vessel_names": list(vessel_names)}
         if world_from_patient_m is not None:
             manifest["transforms"]["world_from_patient_m"] = rigid_transform(world_from_patient_m).tolist()
         (folder / "patient_twin.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))
