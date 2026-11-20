@@ -30,6 +30,8 @@ UVs and USD Preview Surface compatible materials/textures are supported. Use
 Principled BSDF and image textures; bake unsupported procedural shaders first.
 Do not change scene units. Leave Object Mode active when finished. Do not export
 or modify source files: the application validates and publishes the result.
+Before finishing, run the supplied check_asset command through execute_blender_code.
+Fix any reported scene errors and check again before finishing.
 """
 
 
@@ -170,7 +172,10 @@ def _run_blender(args: argparse.Namespace, workspace: Path, settings: dict) -> N
         try:
             if args.command != 'finalize':
                 print('Editing asset…', flush=True)
-                prompt = f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}"
+                worker = str(Path(__file__).with_name('blender.py'))
+                prompt = (f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}\n"
+                          f"Scene check: exec(compile(open({worker!r}).read(), {worker!r}, 'exec')); "
+                          f"check_asset({str(workspace)!r})")
                 if args.backend == 'claude':
                     async def bounded():
                         await asyncio.wait_for(run_claude(prompt, workspace, config, args.model,

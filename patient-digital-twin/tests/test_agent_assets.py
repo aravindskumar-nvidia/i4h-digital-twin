@@ -142,7 +142,14 @@ obj.select_set(True)
 bpy.ops.object.mode_set(mode='EDIT')
 bpy.ops.mesh.select_all(action='SELECT')
 bpy.ops.uv.smart_project()
+try:
+    check_asset({str(work)!r})
+except ValueError as exc:
+    assert 'Edit Mode' in str(exc)
+else:
+    raise AssertionError('Scene check accepted Edit Mode')
 bpy.ops.object.mode_set(mode='OBJECT')
+check_asset({str(work)!r})
 material = obj.data.materials[0]
 material.use_nodes = True
 bsdf = next(n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')

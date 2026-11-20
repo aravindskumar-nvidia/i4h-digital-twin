@@ -43,6 +43,24 @@ def open_checkpoint(directory):
     (folder / 'opened').touch()
 
 
+def check_asset(directory):
+    import bpy
+
+    settings = json.loads((Path(directory) / 'edit.json').read_text())
+    scene = bpy.context.scene
+    if scene.get('i4h_session') != settings['token']:
+        raise ValueError('Return to the I4H editing scene before exporting')
+    meshes = [o for o in scene.objects if o.type == 'MESH']
+    paths = [o.data.get('i4h_path') for o in meshes]
+    if len(paths) != len(set(paths)) or set(paths) != set(settings['paths']):
+        raise ValueError('Keep the existing meshes and their i4h_path identity; add/delete/split/join is unsupported')
+    if any(o.mode != 'OBJECT' for o in meshes):
+        raise ValueError('Leave Edit Mode before exporting')
+    if any(o.type not in {'MESH', 'EMPTY', 'LIGHT', 'CAMERA'} for o in scene.objects):
+        raise ValueError('Only mesh edits, materials and textures are supported')
+    return meshes
+
+
 def export_asset(directory):
     import bpy
 
@@ -59,14 +77,7 @@ def export_asset(directory):
     metadata = folder / '.edit.json'
     metadata.write_text(json.dumps(settings))
     metadata.replace(folder / 'edit.json')
-    meshes = [o for o in scene.objects if o.type == 'MESH']
-    paths = [o.data.get('i4h_path') for o in meshes]
-    if len(paths) != len(set(paths)) or set(paths) != set(settings['paths']):
-        raise ValueError('Keep the existing meshes and their i4h_path identity; add/delete/split/join is unsupported')
-    if any(o.mode != 'OBJECT' for o in meshes):
-        raise ValueError('Leave Edit Mode before exporting')
-    if any(o.type not in {'MESH', 'EMPTY', 'LIGHT', 'CAMERA'} for o in scene.objects):
-        raise ValueError('Only mesh edits, materials and textures are supported')
+    meshes = check_asset(directory)
     for obj in meshes:
         obj['i4h_path'] = obj.data['i4h_path']
     with _export_all_meshes(scene):
