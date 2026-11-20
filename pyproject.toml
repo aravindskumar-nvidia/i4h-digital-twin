@@ -21,6 +21,9 @@ dependencies = [
 
 [project.optional-dependencies]
 patient-dicom = ["SimpleITK>=2.3.0"]
+patient-agent = ["mcp>=1.26,<2"]
+patient-claude = ["mcp>=1.26,<2", "claude-agent-sdk>=0.2.154,<0.3"]
+patient-codex = ["mcp>=1.26,<2", "openai-codex>=0.163,<0.164"]
 patient-nvsegment = ["torch>=2.4", "monai>=1.5", "pytorch-ignite>=0.5", "fire>=0.6", "einops>=0.7", "huggingface_hub>=0.20", "matplotlib>=3.7", "tqdm>=4.65", "scipy>=1.10"]
 patient-nvgenerate = ["torch>=2.4", "monai>=1.5", "einops>=0.7", "huggingface_hub>=0.20", "matplotlib>=3.7", "tqdm>=4.65", "fire>=0.5", "tensorboard>=2.14", "scipy>=1.10"]
 patient-pipeline = ["usd-core>=24.3; sys_platform != 'linux' or platform_machine != 'aarch64'", "usd-exchange>=2.2; sys_platform == 'linux' and platform_machine == 'aarch64'", "vtk", "scipy>=1.10"]
