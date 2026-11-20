@@ -192,13 +192,17 @@ def test_bundle_regenerates_navigation_on_original_ct_grid(tmp_path, selection):
         labelmap[2] = 'inferior_vena_cava'
     body = HumanBody(SegmentationImporter(labels, labelmap).to_anatomy_collection())
     body.attach_scan(from_array(labels.transpose(2, 1, 0), np.eye(4), world_unit='mm'))
+    body.extract_topology()
     source = body.export_patient_twin(tmp_path / 'source', vessel_names=['aorta'])
+    body.anatomy.structures['aorta'].local_to_world[:3, 3] += [.1, .2, .3]
+    companion = body.export_to_usd(source.parent / 'human_body.usdc') if selection != 'single' else None
+    before = companion.read_bytes() if companion else None
     manifest = yaml.safe_load(source.read_text())
     assert manifest['navigation'] == {'vessel_names': ['aorta']}
     if selection != 'saved':
         del manifest['navigation']
         source.write_text(yaml.safe_dump(manifest))
-    for name in ('human_body.usdc', 'view.png', 'inference_summary.json'):
+    for name in ('view.png', 'inference_summary.json'):
         (source.parent / name).write_bytes(b'stale output from the original run')
     work = tmp_path / 'work'
     if selection == 'ambiguous':
@@ -213,12 +217,31 @@ def test_bundle_regenerates_navigation_on_original_ct_grid(tmp_path, selection):
     points = mesh.GetPointsAttr().Get()
     mesh.GetPointsAttr().Set([p + Gf.Vec3f(2, 0, 0) for p in points])
     mesh.MakeInvisible()
+    material = UsdShade.MaterialBindingAPI(mesh).ComputeBoundMaterial()[0]
+    shader = material.ComputeSurfaceSource()[0]
+    shader.GetInput('diffuseColor').Set(Gf.Vec3f(.8, .1, .2))
     edited.Export(str(work / 'edited.usdc'))
     output = finalize(work, tmp_path / 'final')
     assert yaml.safe_load(output.read_text())['navigation'] == {'vessel_names': ['aorta']}
     assert yaml.safe_load(output.read_text())['anatomy'] == manifest['anatomy']
     assert not any((output.parent / name).exists() for name in
-                   ('human_body.usdc', 'view.png', 'inference_summary.json'))
+                   ('view.png', 'inference_summary.json'))
+    assert (output.parent / 'human_body.usdc').exists() == (companion is not None)
+    if companion:
+        assert companion.read_bytes() == before
+        old = Usd.Stage.Open(str(companion))
+        stage = Usd.Stage.Open(str(output.parent / companion.name))
+        prim = stage.GetPrimAtPath('/HumanBody/Anatomy/aorta')
+        original = old.GetPrimAtPath(prim.GetPath())
+        assert UsdGeom.XformCache().GetLocalToWorldTransform(prim) == UsdGeom.XformCache().GetLocalToWorldTransform(original)
+        for name in ('points', 'centerline:points'):
+            np.testing.assert_allclose(prim.GetAttribute(name).Get(),
+                                       np.asarray(original.GetAttribute(name).Get()) + [2, 0, 0], atol=1e-5)
+        ct = '/HumanBody/Imaging/CT'
+        for attr in old.GetPrimAtPath(ct).GetAttributes():
+            assert stage.GetPrimAtPath(ct).GetAttribute(attr.GetName()).Get() == attr.Get()
+        material = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0]
+        assert material.ComputeSurfaceSource()[0].GetInput('diffuseColor').Get() == Gf.Vec3f(.8, .1, .2)
     assert (output.parent / 'volume.npy').read_bytes() == (source.parent / 'volume.npy').read_bytes()
     assert (output.parent / 'volume.yaml').read_bytes() == (source.parent / 'volume.yaml').read_bytes()
     np.testing.assert_allclose(np.load(output.parent / 'centerline_points.npy')[:, 0], 13., atol=1e-6)

@@ -120,6 +120,15 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
                     _navigation(original, manifest, folder, vessel_names)
                 manifest.setdefault('navigation', {})['vessel_names'] = vessel_names
             (folder / 'patient_twin.yaml').write_text(yaml.safe_dump(manifest, sort_keys=False))
+            companion = source.parent / 'human_body.usdc'
+            if companion.is_file():
+                standalone = Usd.Stage.Open(Usd.Stage.Open(str(companion)).Flatten())
+                pairs = [(mesh, path) for mesh, path in zip(meshes, paths) if standalone.GetPrimAtPath(path)]
+                for _, path in pairs:
+                    _merge_mesh(standalone.GetPrimAtPath(path), original.GetPrimAtPath(path), local=True)
+                _merge_materials(standalone, edited, [m for m, _ in pairs], [p for _, p in pairs], settings['token'])
+                _copy_textures(standalone, workspace, folder)
+                standalone.Export(str(folder / companion.name))
         _copy_textures(original, workspace, target.parent)
         original.Export(str(target))
         reopened = Usd.Stage.Open(str(target))
@@ -130,7 +139,7 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
     return result / ('patient_twin.yaml' if manifest is not None else source.name)
 
 
-def _merge_mesh(target, edited) -> bool:
+def _merge_mesh(target, edited, *, local=False) -> bool:
     """Keep original geometry exactly when only appearance changed."""
     from pxr import Gf, Sdf, UsdGeom, Vt
 
@@ -139,7 +148,8 @@ def _merge_mesh(target, edited) -> bool:
     units = UsdGeom.GetStageMetersPerUnit(stage)
     scale = Gf.Matrix4d().SetScale(UsdGeom.GetStageMetersPerUnit(source) / units)
     cache = UsdGeom.XformCache()
-    matrix = cache.GetLocalToWorldTransform(edited) * scale * cache.GetLocalToWorldTransform(target).GetInverse()
+    matrix = scale if local else (cache.GetLocalToWorldTransform(edited) * scale
+                                  * cache.GetLocalToWorldTransform(target).GetInverse())
     if not np.all(np.asarray(mesh.GetFaceVertexCountsAttr().Get()) == 3):
         raise ValueError('Export triangulated meshes from Blender')
     points, faces = validate_triangles(
