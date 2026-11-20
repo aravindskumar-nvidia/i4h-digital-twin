@@ -5,18 +5,33 @@ import contextlib
 import json
 from pathlib import Path
 
+USD_IMPORT_OPTIONS = dict(import_visible_only=False, property_import_mode='ALL', merge_parent_xform=False)
+USD_EXPORT_OPTIONS = dict(export_animation=False, export_materials=True, generate_preview_surface=True,
+                          export_custom_properties=True, triangulate_meshes=True, export_lights=False,
+                          export_cameras=False, export_hair=False, export_armatures=False,
+                          export_shapekeys=False, relative_paths=True, overwrite_textures=True)
+
+
+def _check_usd_support():
+    import bpy
+
+    for operator, options in ((bpy.ops.wm.usd_import, USD_IMPORT_OPTIONS), (bpy.ops.wm.usd_export, USD_EXPORT_OPTIONS)):
+        missing = options.keys() - operator.get_rna_type().properties.keys()
+        if missing:
+            raise RuntimeError(f'Blender {bpy.app.version_string} lacks required USD options: {sorted(missing)}')
+
 
 def open_asset(directory):
     import bpy
 
+    _check_usd_support()
     folder = Path(directory)
     settings = json.loads((folder / 'edit.json').read_text())
     scene = bpy.data.scenes.new('I4H ' + settings['token'])
     bpy.context.window.scene = scene
     scene.unit_settings.system = 'METRIC'
     scene.unit_settings.scale_length = 1.0
-    bpy.ops.wm.usd_import(filepath=str(folder / 'input.usdc'), import_visible_only=False,
-                          property_import_mode='ALL', merge_parent_xform=False)
+    bpy.ops.wm.usd_import(filepath=str(folder / 'input.usdc'), **USD_IMPORT_OPTIONS)
     from mathutils import Matrix
 
     # Bake import unit/parent transforms so mesh editing coordinates are meters.
@@ -32,6 +47,7 @@ def open_asset(directory):
 def open_checkpoint(directory):
     import bpy
 
+    _check_usd_support()
     folder = Path(directory)
     settings = json.loads((folder / 'edit.json').read_text())
     with bpy.data.libraries.load(str(folder / 'edited.blend'), link=False) as (source, loaded):
@@ -81,12 +97,7 @@ def export_asset(directory):
     for obj in meshes:
         obj['i4h_path'] = obj.data['i4h_path']
     with _export_all_meshes(scene):
-        bpy.ops.wm.usd_export(filepath=str(folder / 'edited.usdc'), export_animation=False,
-                              export_materials=True, generate_preview_surface=True,
-                              export_custom_properties=True, triangulate_meshes=True,
-                              export_lights=False, export_cameras=False, export_hair=False,
-                              export_armatures=False, export_shapekeys=False,
-                              relative_paths=True, overwrite_textures=True)
+        bpy.ops.wm.usd_export(filepath=str(folder / 'edited.usdc'), **USD_EXPORT_OPTIONS)
 
 
 @contextlib.contextmanager

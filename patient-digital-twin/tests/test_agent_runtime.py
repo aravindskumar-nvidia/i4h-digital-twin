@@ -18,7 +18,7 @@ def test_installer_checks_hash_and_reuses_cached_binary(tmp_path, monkeypatch, v
     archive = io.BytesIO()
     with tarfile.open(fileobj=archive, mode='w:xz') as package:
         info = tarfile.TarInfo(f'blender-{runtime.BLENDER_VERSION}-linux-x64/blender')
-        data = b'#!/bin/sh\nexit 0\n'
+        data = f'#!/bin/sh\necho "Blender {runtime.BLENDER_VERSION}"\n'.encode()
         info.size, info.mode = len(data), 0o755
         package.addfile(info, io.BytesIO(data))
     payload = archive.getvalue()
@@ -29,6 +29,8 @@ def test_installer_checks_hash_and_reuses_cached_binary(tmp_path, monkeypatch, v
     monkeypatch.setattr(runtime.platform, 'machine', lambda: 'x86_64')
     monkeypatch.setattr(runtime, 'BLENDER_SHA256', hashlib.sha256(payload).hexdigest() if valid else '0' * 64)
     monkeypatch.setattr(runtime.urllib.request, 'urlopen', lambda *a, **kw: io.BytesIO(payload))
+    prompts = []
+    monkeypatch.setattr('builtins.input', lambda prompt: prompts.append(prompt) or 'y')
     if not valid:
         with pytest.raises(ValueError, match='SHA-256'):
             runtime.ensure_blender()
@@ -37,6 +39,27 @@ def test_installer_checks_hash_and_reuses_cached_binary(tmp_path, monkeypatch, v
     path = runtime.ensure_blender()
     assert Path(path).is_file() and os.access(path, os.X_OK)
     monkeypatch.setattr(runtime.urllib.request, 'urlopen', lambda *a, **kw: pytest.fail('Cached Blender was downloaded again'))
+    assert runtime.ensure_blender() == path
+    assert len(prompts) == 1
+    Path(path).write_text('#!/bin/sh\necho "Blender 2.93.0"\n')
+    with pytest.raises(RuntimeError, match='incompatible'):
+        runtime.ensure_blender()
+    Path(path).write_text('#!/bin/sh\nexit 46\n')
+    with pytest.raises(RuntimeError, match='--version failed.*BLENDER_EXECUTABLE'):
+        runtime.ensure_blender()
+    Path(path).unlink()
+    monkeypatch.setattr('builtins.input', lambda _: 'n')
+    with pytest.raises(RuntimeError, match='cancelled'):
+        runtime.ensure_blender()
+
+    def no_input(_):
+        raise EOFError
+
+    monkeypatch.setattr('builtins.input', no_input)
+    with pytest.raises(RuntimeError, match='I4H_INSTALL_BLENDER=1'):
+        runtime.ensure_blender()
+    monkeypatch.setenv('I4H_INSTALL_BLENDER', '1')
+    monkeypatch.setattr(runtime.urllib.request, 'urlopen', lambda *a, **kw: io.BytesIO(payload))
     assert runtime.ensure_blender() == path
 
 
@@ -49,6 +72,10 @@ def test_existing_blender_is_not_installed_or_owned(tmp_path, monkeypatch):
         with runtime.blender_session(tmp_path, config) as connection:
             assert connection is config
             raise RuntimeError('agent failure')
+    remote = {**config, 'env': {**config['env'], 'BLENDER_HOST': '10.0.0.5'}}
+    with pytest.raises(RuntimeError, match='must run on this machine'):
+        with runtime.blender_session(tmp_path, remote, 'existing'):
+            pytest.fail('Remote Blender cannot access workspace files')
 
 
 def test_real_virtual_desktop_and_cleanup_on_failure(tmp_path, monkeypatch):
