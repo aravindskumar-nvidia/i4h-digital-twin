@@ -15,7 +15,12 @@ import yaml
 from ..anatomy import Kind, is_vessel
 from ..body import _extract_mesh_centerline
 from ..export import _publish
-from ..geometry import native_centerline, transform_points, validate_triangles, voxelize_mesh
+from ..geometry import (
+    native_centerline,
+    transform_points,
+    validate_triangles,
+    voxelize_mesh,
+)
 from ..scan_volume import load_artifact
 
 
