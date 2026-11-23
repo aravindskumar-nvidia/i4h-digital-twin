@@ -8,19 +8,25 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
+import sys
 import tempfile
+from collections.abc import Callable, Iterator
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from threading import Timer
+from time import monotonic
 from typing import cast
 
-from .assets import finalize, prepare
+from .assets import AssetValidationError, finalize, load_workspace, prepare
+from .runtime import MCP_PACKAGE, blender_session
 
-BLENDER_TOOLS = ('execute_blender_code', 'get_scene_info', 'get_object_info', 'get_viewport_screenshot')
+BLENDER_TOOLS = ('execute_blender_code', 'get_scene_info', 'look')
 DEFAULT_CODEX_TOKEN_BUDGET = 100_000
 
 INSTRUCTIONS = """Edit the supplied I4H scene using Blender MCP. Inspect the scene and a
-viewport screenshot before and after changes. Only edit this session's scene.
+viewport screenshot before and after changes (use look for images). Only edit this session's scene.
 Keep the existing mesh objects and their mesh-data i4h_path properties: adding,
 deleting, splitting or joining objects is unsupported. Geometry edits, modifiers,
 UVs and USD Preview Surface compatible materials/textures are supported. Use
@@ -33,8 +39,8 @@ Fix any reported scene errors and check again before finishing.
 
 
 def mcp_config() -> dict:
-    """Use the upstream server and the user's already-running Blender add-on."""
-    return {"command": "uvx", "args": ["mcp-for-blender"],
+    """Use the pinned upstream server; runtime selects an existing or managed Blender."""
+    return {"command": "uvx", "args": ["--from", MCP_PACKAGE, "mcp-for-blender"],
             "env": {"BLENDER_MCP_DISABLE_TELEMETRY": "true",
                     **{key: os.environ[key] for key in ("BLENDER_HOST", "BLENDER_PORT") if key in os.environ}}}
 
@@ -46,19 +52,46 @@ async def blender_call(config: dict, function: str, workspace: Path) -> None:
     worker = Path(__file__).with_name('blender.py')
     marker = workspace / ('edited.usdc' if function == 'export_asset' else 'opened')
     marker.unlink(missing_ok=True)
-    code = f"exec(compile(open({str(worker)!r}).read(), {str(worker)!r}, 'exec')); {function}({str(workspace)!r})"
+    failure = workspace / 'validation-error.txt'
+    failure.unlink(missing_ok=True)
+    call = f"{function}({str(workspace)!r})"
+    if function == 'export_asset':
+        call = (f"try:\n    {call}\n"
+                f"except ValueError as exc:\n    Path({str(failure)!r}).write_text(str(exc))\n")
+    code = f"exec(compile(open({str(worker)!r}).read(), {str(worker)!r}, 'exec'))\n{call}"
     with (workspace / 'mcp.log').open('a') as log:
         async with stdio_client(StdioServerParameters(**config), errlog=log) as (read, write):
             async with ClientSession(read, write, read_timeout_seconds=timedelta(seconds=120)) as client:
                 await client.initialize()
                 result = await client.call_tool('execute_blender_code', {'code': code})
-                if result.isError or not marker.is_file():
-                    raise RuntimeError(f'Blender {function} failed: {result.content}')
+    if failure.is_file():
+        raise AssetValidationError(failure.read_text())
+    if result.isError or not marker.is_file():
+        raise RuntimeError(f'Blender {function} failed: {result.content}')
 
 
-async def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
-                     max_turns: int, budget_usd: float) -> None:
-    """Stream a bounded Claude Agent SDK session using its normal authentication."""
+def _edit_attempts(prompt: str, publish: Callable[[], None] | None, max_repairs: int) -> Iterator[str]:
+    """Yield prompts and publish each completed attempt."""
+    for attempt in range(max_repairs + 1):
+        yield prompt
+        if publish is None:
+            return
+        try:
+            publish()
+            return
+        except AssetValidationError as exc:
+            if attempt == max_repairs:
+                raise
+            print(f'Validation failed; repair {attempt + 1}/{max_repairs}: {exc}', flush=True)
+            prompt = (f'The edited asset failed validation:\n{exc}\n'
+                      'Repair the current scene while preserving the requested edits and original identities. '
+                      'Run the scene check before finishing. The application will retry export and publication.')
+
+
+def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
+               max_turns: int, budget_usd: float, timeout_s: float = 600, *,
+               publish: Callable[[], None] | None = None, max_repairs: int = 2) -> None:
+    """Stream Claude turns, resuming the conversation with the remaining limits."""
     from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
     from claude_agent_sdk.types import McpStdioServerConfig
 
@@ -67,21 +100,39 @@ async def run_claude(prompt: str, workspace: Path, config: dict, model: str | No
         tools=[], allowed_tools=["mcp__blender__" + name for name in BLENDER_TOOLS], mcp_servers={"blender": cast(McpStdioServerConfig, config)},
         setting_sources=[], max_turns=max_turns, max_budget_usd=budget_usd,
     )
-    finished = False
-    async for message in query(prompt=prompt, options=options):
-        for block in getattr(message, "content", []):
-            if text := getattr(block, "text", None):
-                print(text, flush=True)
-        if isinstance(message, ResultMessage):
-            finished = True
-            if message.is_error or message.subtype != "success":
-                raise RuntimeError(f"Claude session ended: {message.subtype}")
-    if not finished:
-        raise RuntimeError("Claude session ended without a result")
+
+    async def turn():
+        result = None
+        async for message in query(prompt=prompt, options=options):
+            for block in getattr(message, "content", []):
+                if text := getattr(block, "text", None):
+                    print(text, flush=True)
+            if isinstance(message, ResultMessage):
+                result = message
+                if message.is_error or message.subtype != "success":
+                    raise RuntimeError(f"Claude session ended: {message.subtype}")
+        if result is None:
+            raise RuntimeError("Claude session ended without a result")
+        return result
+
+    remaining_turns, remaining_budget = max_turns, budget_usd
+    deadline = monotonic() + timeout_s
+    for prompt in _edit_attempts(prompt, publish, max_repairs):
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Agent editing timed out')
+        if remaining_turns <= 0 or remaining_budget <= 0:
+            raise RuntimeError('Claude session limits exhausted; saved edits retained')
+        result = asyncio.run(asyncio.wait_for(turn(), remaining))
+        remaining_turns -= result.num_turns
+        remaining_budget = budget_usd - (result.total_cost_usd if result.total_cost_usd is not None else budget_usd)
+        options = replace(options, resume=result.session_id,
+                          max_turns=remaining_turns, max_budget_usd=remaining_budget)
 
 
 def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600,
-              token_budget: int = DEFAULT_CODEX_TOKEN_BUDGET) -> None:
+              token_budget: int = DEFAULT_CODEX_TOKEN_BUDGET, *,
+              publish: Callable[[], None] | None = None, max_repairs: int = 2) -> None:
     """Stream the Codex Python SDK; credentials/config remain owned by Codex."""
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
@@ -104,82 +155,159 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
         thread = codex.thread_start(cwd=str(workspace), model=model,
                                     developer_instructions=INSTRUCTIONS,
                                     sandbox=Sandbox.workspace_write, approval_mode=ApprovalMode.deny_all)
-        turn = thread.turn(prompt)
-        def interrupt():
-            with contextlib.suppress(Exception):
-                turn.interrupt()
-        timer = Timer(timeout_s, interrupt)
-        timer.daemon = True
-        timer.start()
-        completed = False
+        deadline = monotonic() + timeout_s
+        for prompt in _edit_attempts(prompt, publish, max_repairs):
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError('Agent editing timed out')
+            turn = thread.turn(prompt)
+            def interrupt():
+                with contextlib.suppress(Exception):
+                    turn.interrupt()
+            timer = Timer(remaining, interrupt)
+            timer.daemon = True
+            timer.start()
+            completed = False
+            try:
+                for event in turn.stream():
+                    method = getattr(event, "method", "")
+                    params = getattr(event, "payload", None)
+                    if method == "item/agentMessage/delta":
+                        print(getattr(params, "delta", ""), end="", flush=True)
+                    if method == "turn/completed":
+                        result = getattr(params, "turn", None)
+                        status = getattr(result, "status", None)
+                        if getattr(status, "value", status) != "completed":
+                            error = getattr(result, "error", None)
+                            raise RuntimeError(error.message if error else f"Codex turn ended: {status}")
+                        completed = True
+            except BaseException:
+                interrupt()
+                raise
+            finally:
+                timer.cancel()
+            if not completed:
+                raise RuntimeError("Codex session ended without a completed turn")
+            print()
+
+
+def parser(command: str = "edit") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__, epilog='Recovery commands use finalize or resume with --workspace PATH.')
+    parser.set_defaults(command=command)
+    if command == 'edit':
+        parser.add_argument('--input', type=Path, required=True, help='Pipeline USD or patient_twin.yaml')
+    else:
+        parser.add_argument('--workspace', type=Path, required=True, help='Retained editing workspace')
+    parser.add_argument('--output', type=Path, required=True, help='New final asset directory')
+    parser.add_argument('--mcp-config', type=Path, help='JSON stdio server config overriding upstream uvx default')
+    parser.add_argument('--blender-mode', choices=('auto', 'virtual', 'existing'),
+                        help='Default: reuse/start Blender; virtual starts a private Xvfb GUI; existing never launches')
+    parser.add_argument('--vessel-names', nargs='+', help='Vessels used to regenerate existing navigation arrays')
+    if command != 'finalize':
+        parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
+        parser.add_argument('--model')
+        parser.add_argument('--timeout', type=float, default=600)
+        parser.add_argument('--max-turns', type=int, help='Claude turn limit, default 30')
+        parser.add_argument('--budget-usd', type=float, help='Claude dollar budget, default 5')
+        parser.add_argument('--token-budget', type=int,
+                            help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
+        parser.add_argument('--max-repairs', type=int, default=2, help='Validation repair attempts, default 2; 0 disables')
+        parser.add_argument('prompt')
+    return parser
+
+
+def _run_blender(args: argparse.Namespace, workspace: Path, settings: dict, output: Path) -> None:
+    config = json.loads(args.mcp_config.read_text()) if args.mcp_config else mcp_config()
+    mode = args.blender_mode or ('existing' if args.mcp_config else 'auto')
+    print('Connecting to Blender…', flush=True)
+    with blender_session(workspace, config, mode) as config:
+        asyncio.run(blender_call(config, 'open_asset' if args.command == 'edit' else 'open_checkpoint', workspace))
+
+        def publish():
+            print('Exporting edited asset…', flush=True)
+            asyncio.run(blender_call(config, 'export_asset', workspace))
+            try:
+                result = finalize(workspace, output, vessel_names=settings['vessel_names'])
+            except ValueError as exc:
+                raise AssetValidationError(str(exc)) from exc
+            print(result)
+
         try:
-            for event in turn.stream():
-                method = getattr(event, "method", "")
-                params = getattr(event, "payload", None)
-                if method == "item/agentMessage/delta":
-                    print(getattr(params, "delta", ""), end="", flush=True)
-                if method == "turn/completed":
-                    result = getattr(params, "turn", None)
-                    status = getattr(result, "status", None)
-                    if getattr(status, "value", status) != "completed":
-                        error = getattr(result, "error", None)
-                        raise RuntimeError(error.message if error else f"Codex turn ended: {status}")
-                    completed = True
+            if args.command == 'finalize':
+                publish()
+                return
+            print('Editing asset…', flush=True)
+            worker = str(Path(__file__).with_name('blender.py'))
+            prompt = (f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}\n"
+                      f"Scene check: exec(compile(open({worker!r}).read(), {worker!r}, 'exec')); "
+                      f"check_asset({str(workspace)!r})")
+            if args.backend == 'claude':
+                run_claude(prompt, workspace, config, args.model, args.max_turns or 30,
+                           args.budget_usd or 5, args.timeout, publish=publish, max_repairs=args.max_repairs)
+            else:
+                run_codex(prompt, workspace, config, args.model, args.timeout,
+                          args.token_budget or DEFAULT_CODEX_TOKEN_BUDGET,
+                          publish=publish, max_repairs=args.max_repairs)
         except BaseException:
-            interrupt()
+            with contextlib.suppress(Exception):
+                asyncio.run(blender_call(config, 'export_asset', workspace))
             raise
-        finally:
-            timer.cancel()
-        if not completed:
-            raise RuntimeError("Codex session ended without a completed turn")
-        print()
 
 
 def main(argv: list[str] | None = None) -> int:
     """Optionally edit an existing pipeline output; generation itself is unchanged."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
-    parser.add_argument('--input', type=Path, required=True, help='Pipeline USD or patient_twin.yaml')
-    parser.add_argument('--output', type=Path, required=True, help='New final asset directory')
-    parser.add_argument('--mcp-config', type=Path, help='JSON stdio server config overriding upstream uvx default')
-    parser.add_argument('--vessel-names', nargs='+', help='Vessels used to regenerate existing navigation arrays')
-    parser.add_argument('--model')
-    parser.add_argument('--timeout', type=float, default=600)
-    parser.add_argument('--max-turns', type=int, help='Claude turn limit, default 30')
-    parser.add_argument('--budget-usd', type=float, help='Claude dollar budget, default 5')
-    parser.add_argument('--token-budget', type=int, help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
-    parser.add_argument('prompt')
-    args = parser.parse_args(argv)
-    if args.backend == 'codex' and (args.max_turns is not None or args.budget_usd is not None):
-        parser.error('Codex uses --token-budget. --max-turns and --budget-usd apply only to Claude')
-    if args.backend == 'claude' and args.token_budget is not None:
-        parser.error('--token-budget applies only to Codex')
-    for value in (args.timeout, args.max_turns, args.budget_usd, args.token_budget):
-        if value is not None and not 0 < value < float('inf'):
-            parser.error('Session limits must be positive and finite')
+    argv = list(sys.argv[1:] if argv is None else argv)
+    command = argv.pop(0) if argv and argv[0] in {'finalize', 'resume'} else 'edit'
+    cli = parser(command)
+    args = cli.parse_args(argv)
+    if command != 'finalize':
+        if args.backend == 'codex' and (args.max_turns is not None or args.budget_usd is not None):
+            cli.error('Codex uses --token-budget. --max-turns and --budget-usd apply only to Claude')
+        if args.backend == 'claude' and args.token_budget is not None:
+            cli.error('--token-budget applies only to Codex')
+        if args.max_repairs < 0:
+            cli.error('max-repairs must be nonnegative')
+        for value in (args.timeout, args.max_turns, args.budget_usd, args.token_budget):
+            if value is not None and not 0 < value < float('inf'):
+                cli.error('Session limits must be positive and finite')
     output = args.output.expanduser().resolve()
     if output.exists():
-        parser.error('Use a new output directory')
+        cli.error('Use a new output directory')
     output.parent.mkdir(parents=True, exist_ok=True)
-    config = json.loads(args.mcp_config.read_text()) if args.mcp_config else mcp_config()
-    # Same host/filesystem as Blender; the temporary files never replace the input.
-    with tempfile.TemporaryDirectory(prefix='.asset-edit-', dir=output.parent) as temp:
-        workspace = Path(temp)
-        settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
-        asyncio.run(blender_call(config, 'open_asset', workspace))
-        worker = str(Path(__file__).with_name('blender.py'))
-        prompt = (f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}\n"
-                  f"Scene check: exec(compile(open({worker!r}).read(), {worker!r}, 'exec')); "
-                  f"check_asset({str(workspace)!r})")
-        if args.backend == 'claude':
-            async def bounded():
-                await asyncio.wait_for(run_claude(prompt, workspace, config, args.model,
-                                                 args.max_turns or 30, args.budget_usd or 5), args.timeout)
-            asyncio.run(bounded())
+    if args.mcp_config and args.blender_mode not in {None, 'existing'}:
+        cli.error('--mcp-config requires --blender-mode existing')
+    if command == 'edit':
+        workspace = Path(tempfile.mkdtemp(prefix='.asset-edit-', dir=output.parent))
+    else:
+        workspace = args.workspace.expanduser().resolve()
+    checkpoint, edited = workspace / 'edited.blend', workspace / 'edited.usdc'
+    if command != 'edit':
+        if not all((workspace / name).is_file() for name in ('edit.json', 'original.usdc')):
+            cli.error('Workspace must contain edit.json and original.usdc')
+        if not checkpoint.is_file() and (command == 'resume' or not edited.is_file()):
+            cli.error('Resume requires edited.blend. Finalize requires edited.blend or edited.usdc')
+    try:
+        if command == 'edit':
+            settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
         else:
-            run_codex(prompt, workspace, config, args.model, args.timeout, args.token_budget or DEFAULT_CODEX_TOKEN_BUDGET)
-        asyncio.run(blender_call(config, 'export_asset', workspace))
-        print(finalize(workspace, output, vessel_names=settings['vessel_names']))
+            settings = load_workspace(workspace, vessel_names=args.vessel_names)
+        needs_export = (command != 'finalize' or not edited.is_file()
+                        or (checkpoint.is_file() and checkpoint.stat().st_mtime_ns > edited.stat().st_mtime_ns))
+        if needs_export:
+            _run_blender(args, workspace, settings, output)
+        else:
+            print(finalize(workspace, output, vessel_names=settings['vessel_names']))
+    except AssetValidationError as exc:
+        print(f'Publication stopped. {exc}', file=sys.stderr)
+        print(f'Saved edits are retained at {workspace}', file=sys.stderr)
+        return 1
+    except BaseException:
+        print(f'Edit failed; recovery files retained at {workspace}', file=sys.stderr)
+        raise
+    else:
+        if command == 'edit':
+            shutil.rmtree(workspace)
     return 0
 
 

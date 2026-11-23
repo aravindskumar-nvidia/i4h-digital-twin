@@ -3,12 +3,14 @@
 """Verify final artifacts; optionally exercise actual Blender import/export."""
 import os
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
 from patient_digital_twin import HumanBody, SegmentationImporter
+from patient_digital_twin.agent import __main__ as cli
 from patient_digital_twin.agent.assets import finalize, prepare
 from patient_digital_twin.scan_volume import from_array
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
@@ -47,6 +49,14 @@ def test_commit_preserves_ct_texture_and_structure_centerline(asset, tmp_path, d
     shader.CreateInput('file', Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(str(texture)))
     edited.Export(str(work / 'edited.usdc'))
     before = source.read_bytes()
+    snapshot = Usd.Stage.Open(str(work / 'original.usdc'))
+    baseline = snapshot.GetRootLayer().ExportToString()
+    texture.unlink()
+    with pytest.raises(ValueError, match='Unresolved texture'):
+        finalize(work, tmp_path / 'failed')
+    assert not (tmp_path / 'failed').exists()
+    assert snapshot.GetRootLayer().ExportToString() == baseline
+    texture.write_bytes(b'texture-dependency')
     output = finalize(work, tmp_path / 'final')
     assert source.read_bytes() == before
     stage = Usd.Stage.Open(str(output))
@@ -80,6 +90,42 @@ def test_missing_mesh_never_publishes(asset, tmp_path):
         finalize(work, tmp_path / 'final')
     assert not (tmp_path / 'final').exists()
 
+
+@pytest.mark.parametrize('saved', ['usd', 'blend', 'resume'])
+def test_recovery_reuses_saved_edit(asset, tmp_path, monkeypatch, saved):
+    source, work = asset
+    calls = []
+    if saved == 'usd':
+        (work / 'edited.usdc').write_bytes((work / 'input.usdc').read_bytes())
+    else:
+        (work / 'edited.blend').touch()
+
+    async def blender_call(config, function, workspace):
+        calls.append(function)
+        assert workspace == work
+        if function == 'export_asset':
+            (work / 'edited.usdc').write_bytes((work / 'input.usdc').read_bytes())
+
+    monkeypatch.setattr(cli, 'blender_call', blender_call)
+    monkeypatch.setattr(cli, 'blender_session', lambda *args: nullcontext({}))
+    def run_codex(*args, publish, **kwargs):
+        calls.append('agent')
+        publish()
+
+    monkeypatch.setattr(cli, 'run_codex', run_codex)
+    command = ['resume' if saved == 'resume' else 'finalize',
+               '--workspace', str(work), '--output', str(tmp_path / 'final')]
+    if saved == 'resume':
+        command += ['--backend', 'codex', 'Repair the saved edit.']
+    assert cli.main(command) == 0
+    expected = {
+        'usd': [],
+        'blend': ['open_checkpoint', 'export_asset'],
+        'resume': ['open_checkpoint', 'agent', 'export_asset'],
+    }
+    assert calls == expected[saved]
+    assert (tmp_path / 'final' / source.name).is_file()
+    assert (work / 'original.usdc').is_file()
 
 
 @pytest.mark.parametrize('hidden', [False, True])
@@ -130,6 +176,8 @@ material.node_tree.links.new(texture.outputs['Color'], bsdf.inputs['Base Color']
 obj.hide_render = {not hidden!r}
 obj.hide_viewport = {not hidden!r}
 obj.hide_set({not hidden!r})
+export_asset({str(work)!r})
+open_checkpoint({str(work)!r})
 export_asset({str(work)!r})
 ''')
     subprocess.run([blender, '-b', '--factory-startup', '--python-exit-code', '1', '--python', str(script)], check=True, capture_output=True, text=True)

@@ -7,10 +7,9 @@ From the repository root:
 
 ```bash
 uv pip install -e './patient-digital-twin[pipeline,codex]'
-uvx mcp-for-blender install-addon
 ```
 
-Open Blender, enable its MCP add-on/server, and authenticate Codex. Then run:
+Authenticate Codex, then run (Blender starts automatically if needed):
 
 ```bash
 patient-digital-twin-agent --backend codex \
@@ -18,15 +17,51 @@ patient-digital-twin-agent --backend codex \
   'Smooth the liver surface and give it a red material. Inspect the result.'
 ```
 
-Blender must run on the same machine. The command creates a separate editing
-scene and writes a new output directory; use its returned USD or manifest in
-Isaac. The source and CT data are preserved. For Claude, install the `claude`
-extra and use `--backend claude` with its SDK authentication configured.
+The default reuses a compatible local Blender MCP session, or launches Blender
+with the upstream add-on. With no display on Linux it uses Xvfb. To always use a
+private virtual desktop, add `--blender-mode virtual` (Ubuntu prerequisites:
+`sudo apt install xvfb xauth`). This runs a GUI on a virtual display so viewport
+screenshots work; it is not Blender's background mode or a VNC server.
+
+Existing Blender must meet the pinned MCP's Blender 3.0+ requirement and support
+the USD options used by this workflow. If missing on Linux x86_64, installation of
+the verified official 5.1.2 archive requires Y/N confirmation, or
+`I4H_INSTALL_BLENDER=1` for non-interactive runs. It is installed under
+`$XDG_CACHE_HOME/i4h/blender` (default `~/.cache/i4h/blender`).
+Set `BLENDER_EXECUTABLE` to select an installation; other platforms need Blender
+on PATH or this override. Managed startup is tested on Linux.
+The matching MCP server/add-on is pinned to 2.3.0.
+Only processes started by the command are closed on completion or failure;
+existing Blender sessions and preferences are left intact. `--blender-mode existing`
+disables installation/startup and is the default when using `--mcp-config`.
+
+Scene and output validation failures are returned to the agent for up to two repair attempts.
+Use `--max-repairs N` to change this (`0` disables repairs); the conversation, remaining
+budget and timeout carry across attempts.
+
+Failed runs retain their workspace (including the pre-export `edited.blend`
+checkpoint and import/export diagnostics in `mcp.log`); the error prints its path. Successful fresh edits remove temporary files.
+
+Use a retained workspace to retry publication or continue agent editing.
+
+```bash
+patient-digital-twin-agent finalize --workspace output/.asset-edit-xxxxx --output recovered-patient
+patient-digital-twin-agent resume --workspace output/.asset-edit-xxxxx \
+  --output repaired-patient --backend codex \
+  'Repair the open aorta surface while preserving the existing edits.'
+```
+
+`finalize` uses the exported USD, re-exporting `edited.blend` if newer or if the
+USD is missing. `resume` opens that checkpoint for further agent edits. Both require
+a new output directory and the referenced source files, and retain the workspace.
+
+The returned USD or manifest is the new Isaac input; source and CT data are
+preserved. For Claude, install the `claude` extra and use `--backend claude`.
 
 See [Blender asset editing](blender.md) for supported edits and the output contract.
 Navigation uses the vessel selection saved in the bundle. Older bundles select
 their sole vessel automatically. For older bundles with several vessels, pass
-`--vessel-names aorta ...`. Selection is checked before editing starts.
+`--vessel-names aorta ...`. Selection is checked before Blender starts.
 Use `--help` for session options.
 
 Codex uses `--token-budget` (default 100000) through its native experimental
