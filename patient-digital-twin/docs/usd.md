@@ -157,6 +157,18 @@ Bundle per-structure graphs are stored only on their USD prims. Composite naviga
 frame and units. `centerline_edges.npy` stores index pairs. Navigation arrays
 are generated when attached CT and `vessel_names` request them.
 
+Bundles with navigation arrays record their vessel selection in
+`patient_twin.yaml`.
+
+```yaml
+navigation:
+  vessel_names:
+    - aorta
+```
+
+The editor reads this selection automatically. For older bundles, it uses
+the sole vessel or requires an explicit selection before editing starts.
+
 ## Open in Isaac Sim
 
 Use the checked-in viewer with Isaac Sim's Python interpreter:
