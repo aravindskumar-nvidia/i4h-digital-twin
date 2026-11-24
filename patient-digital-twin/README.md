@@ -245,10 +245,11 @@ anatomy = generator.to_anatomy_collection(names=["aorta"])
 # Matching source CT: generator.ct_scan (attach with body.attach_scan).
 ```
 
-An explicit `--python /model/env/bin/python` (or `python_executable=` in Python)
-opts into a separate process. Use it when dependencies need a different environment
-or other application threads depend on the working directory: upstream inference
-uses relative paths, so in-process calls temporarily change it and are serialized.
+The CLI runs inference in a separate process using the active Python interpreter
+(`sys.executable`). Segmentation, agent SDKs, export, and texture generation use
+one environment. Direct importer API calls can still run in-process; those calls
+serialize upstream working-directory changes. See [backend setup](docs/environment.md)
+for dependencies and model downloads.
 
 Use new output paths. Bundle patient IDs are derived automatically from the input
 folder (`geometry` for generated anatomy); no `--patient-id` option is needed.

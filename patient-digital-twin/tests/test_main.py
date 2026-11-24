@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
+import sys
+
 import nibabel as nib
 import numpy as np
 import pytest
@@ -52,6 +54,7 @@ def test_nvsegment_to_real_usd(monkeypatch, tmp_path, modality):
 
     def segment(self, *, names):
         assert names == ("liver",)
+        assert self.python_executable == sys.executable
         return segmentation_anatomy(
             nib.Nifti1Image(np.ones(image.shape, np.uint8), image.affine),
             {1: "liver"},

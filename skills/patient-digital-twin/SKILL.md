@@ -89,8 +89,8 @@ All public classes import from `patient_digital_twin`; `scan_volume`, `export`, 
   every extraction succeeds. Bundle navigation arrays (`centerline_*.npy`) are computed
   separately on the CT grid from `vessel_names`.
 - Output directories (and the CLI's output) must be new. `export_to_usd` replaces a file.
-- In-process NV inference changes the working directory under a lock; pass
-  `python_executable=` (CLI `--python`) to run the model in another environment.
+- In-process NV inference changes the working directory under a lock; the CLI runs the model in a subprocess using the same Python interpreter.
+  Direct importer callers can still select in-process execution.
 - `scan_volume.py` is kept byte-identical with sensor-simulation; do not edit it here.
 - `vasculature_digital_twin` (same distribution) is deprecated: do not use it for new work.
   Map its calls to `patient_digital_twin` with the README's "Deprecated" section.
@@ -131,7 +131,7 @@ patients or backends.
 - Export fails because the output exists: choose a new directory (bundles, CLI output); `export_to_usd` replaces only a single file.
 - Bundle vessel mask or centerline errors: confirm the CT shares the segmentation grid and that the requested `vessel_names` were imported.
 - `extract_topology` stores nothing: install `vtk`/`scipy` (`pipeline` extra) and check the meshes are closed.
-- NV model import errors: rerun with `--python` pointing at the environment that has the model dependencies.
+- NV model import errors: install the model dependencies in the active environment; CLI workers use the same Python.
 
 ## Examples
 

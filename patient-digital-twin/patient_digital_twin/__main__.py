@@ -75,7 +75,6 @@ def run_pipeline(
     modality: str = "CT",
     bundle_root: str | Path | None = None,
     source_root: str | Path | None = None,
-    python_executable: str | Path | None = None,
     centerline_spacing_mm: float = 1.5,
     series_uid: str | None = None,
     workflow: PatientWorkflow | None = None,
@@ -89,7 +88,7 @@ def run_pipeline(
         input: CT/MR NIfTI, DICOM CT directory, or ``volume.yaml``.
         format: ``"usd"`` or ``"bundle"`` (bundle needs CT and at least one vessel class).
         modality: ``"CT"`` or ``"MR"`` (MR is USD-only, without embedded imaging).
-        bundle_root / source_root / python_executable: backend checkout and optional interpreter.
+        bundle_root / source_root: backend model checkouts; workers use the active Python.
         centerline_spacing_mm: Voxel size for vessel centerline extraction.
         series_uid: DICOM series to use when a directory contains several.
 
@@ -132,11 +131,11 @@ def run_pipeline(
         image = nib.Nifti1Image(scan.values_kji.transpose(2, 1, 0), scan.ijk_to_ras_m)
         image.header.set_xyzt_units("meter")
         segmenter = NVSegmentImporter(image, bundle_root=bundle_root, modality=modality,
-                                      python_executable=python_executable)
+                                      python_executable=sys.executable)
         anatomy = segmenter.to_anatomy_collection(names=None if all_classes else names)
         scan, source_path = (scan, str(input_path)) if modality == "CT" else (None, None)
     else:
-        generator = NVGenerateImporter(source_root=source_root, python_executable=python_executable)
+        generator = NVGenerateImporter(source_root=source_root, python_executable=sys.executable)
         anatomy = generator.to_anatomy_collection(names=None if all_classes else names)
         scan = generator.ct_scan
     if all_classes:
@@ -174,7 +173,6 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--modality", choices=("CT", "MR"), default="CT")
     result.add_argument("--bundle-root", type=Path, help="Inner NV-Segment-CTMR bundle directory")
     result.add_argument("--source-root", type=Path, help="NV-Generate-CTMR checkout")
-    result.add_argument("--python", dest="python_executable", help="Python interpreter for model inference")
     result.add_argument("--centerline-spacing-mm", type=float, default=1.5)
     add_refinement_arguments(result)
     return result
