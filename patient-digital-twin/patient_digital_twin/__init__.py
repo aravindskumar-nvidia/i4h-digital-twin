@@ -3,6 +3,7 @@
 
 """Public API for patient digital twins."""
 
+from .agent import AgentOptions
 from .anatomy import (
     AnatomicalStructure,
     AnatomyCollection,
@@ -26,7 +27,7 @@ from .texturing import TextureOptions, TextureResult, TextureRuntime, texture_me
 __all__ = [
     "AnatomicalStructure", "AnatomyCollection", "CenterlineGraph", "HumanBody", "ImagingVolume",
     "Kind", "MeshGeometry", "NVGenerateImporter", "NVSegmentImporter", "SegmentationImporter",
-    "SimpleImporter", "System", "SurfaceMaterial",
+    "SimpleImporter", "System", "SurfaceMaterial", "AgentOptions",
     "CleanupOptions", "CleanupResult", "prepare_surface", "TextureOptions", "TextureRuntime",
     "TextureResult", "texture_mesh", "TextureReference",
 ]

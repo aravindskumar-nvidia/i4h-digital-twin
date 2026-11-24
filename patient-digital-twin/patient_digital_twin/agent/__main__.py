@@ -19,6 +19,7 @@ from threading import Timer
 from time import monotonic
 from typing import cast
 
+from . import AgentOptions
 from .assets import AssetValidationError, finalize, load_workspace, prepare
 from .runtime import MCP_PACKAGE, blender_session
 
@@ -27,6 +28,10 @@ DEFAULT_CODEX_TOKEN_BUDGET = 100_000
 
 INSTRUCTIONS = """Edit the supplied I4H scene using Blender MCP. Inspect the scene and a
 viewport screenshot before and after changes (use look for images). Only edit this session's scene.
+Each execute_blender_code call has a fresh namespace: import dependencies and
+resolve scenes/objects within that call, or save reusable functions in a workspace
+module. Keep inspection images at max_size=768 or smaller unless detail requires
+more. Save required reference/result comparison images in the workspace.
 Keep the existing mesh objects and their mesh-data i4h_path properties: adding,
 deleting, splitting or joining objects is unsupported. Geometry edits, modifiers,
 UVs and USD Preview Surface compatible materials/textures are supported. Use
@@ -89,7 +94,7 @@ def _edit_attempts(prompt: str, publish: Callable[[], None] | None, max_repairs:
 
 
 def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
-               max_turns: int, budget_usd: float, timeout_s: float = 600, *,
+               max_turns: int, budget_usd: float, timeout_s: float = 900, *,
                publish: Callable[[], None] | None = None, max_repairs: int = 2) -> None:
     """Stream Claude turns, resuming the conversation with the remaining limits."""
     from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
@@ -130,7 +135,7 @@ def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
                           max_turns=remaining_turns, max_budget_usd=remaining_budget)
 
 
-def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 600,
+def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 900,
               token_budget: int = DEFAULT_CODEX_TOKEN_BUDGET, *,
               publish: Callable[[], None] | None = None, max_repairs: int = 2) -> None:
     """Stream the Codex Python SDK; credentials/config remain owned by Codex."""
@@ -207,13 +212,21 @@ def parser(command: str = "edit") -> argparse.ArgumentParser:
     if command != 'finalize':
         parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
         parser.add_argument('--model')
-        parser.add_argument('--timeout', type=float, default=600)
+        parser.add_argument('--timeout', type=float, default=900)
         parser.add_argument('--max-turns', type=int, help='Claude turn limit, default 30')
         parser.add_argument('--budget-usd', type=float, help='Claude dollar budget, default 5')
         parser.add_argument('--token-budget', type=int,
                             help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
         parser.add_argument('--max-repairs', type=int, default=2, help='Validation repair attempts, default 2; 0 disables')
-        parser.add_argument('prompt')
+        parser.add_argument('prompt', nargs='?', default='')
+    if command == 'edit':
+        from .prompts import TASKS
+        parser.add_argument('--agent-task', choices=TASKS)
+        parser.add_argument('--agent-target', nargs='+')
+        parser.add_argument('--anatomy-reference', action='append', default=[], metavar='ORGAN=METADATA')
+        parser.add_argument('--major-branching', dest='include_major_branches', action='store_true', default=False,
+                            help='Include reference-covered major vessel branches (off by default)')
+        parser.add_argument('--fragment-area-mm2', type=float, default=1.0)
     return parser
 
 
@@ -255,6 +268,52 @@ def _run_blender(args: argparse.Namespace, workspace: Path, settings: dict, outp
             raise
 
 
+def edit_asset(source: str | Path, output: str | Path, options: AgentOptions, *, workspace: str | Path) -> Path:
+    """Edit through the same SDK lifecycle and repair loop used by the CLI."""
+    from ..refinement import prepare_references
+
+    output, workspace = Path(output).resolve(), Path(workspace).resolve()
+    if output.exists():
+        raise FileExistsError(f'Use a new output directory: {output}')
+    workspace.mkdir(parents=True, exist_ok=False)
+    settings = prepare(Path(source), workspace)
+    from .prompts import build_prompt
+    prompt = build_prompt(options.task, options.targets, options.prompt,
+                          references=options.anatomy_references, major_branching=options.include_major_branches)
+    for name in options.targets or options.anatomy_references:
+        if '/HumanBody/Anatomy/' + name not in settings['paths']:
+            raise ValueError(f'Agent target is not in the patient asset: {name}')
+    if options.anatomy_references:
+        prompt += prepare_references(workspace, options.anatomy_references,
+                                     options.include_major_branches, options.fragment_area_mm2, operation=options.task)
+        settings = load_workspace(workspace)
+    (workspace / 'task_prompt.txt').write_text(prompt)
+    args = argparse.Namespace(
+        command='edit', mcp_config=None, blender_mode=options.blender_mode,
+        prompt=prompt, backend=options.backend, model=options.model,
+        max_turns=options.max_turns, budget_usd=options.budget_usd,
+        token_budget=options.token_budget, timeout=options.timeout_s, max_repairs=options.max_repairs,
+    )
+    _run_blender(args, workspace, settings, output)
+    source_path = Path(settings['source'])
+    return output / ('patient_twin.yaml' if settings['manifest'] is not None else source_path.name)
+
+
+def resume_asset(workspace: Path, output: Path, options: AgentOptions) -> Path:
+    """Resume the editor within a parent pipeline, then return to that pipeline."""
+    settings = load_workspace(workspace)
+    if not (workspace / 'edited.blend').is_file():
+        raise ValueError('Agent resume requires edited.blend')
+    saved_prompt = workspace / 'task_prompt.txt'
+    continuation = saved_prompt.read_text() if saved_prompt.is_file() else options.prompt
+    args = argparse.Namespace(command='resume', mcp_config=None, blender_mode=options.blender_mode,
+        prompt=continuation, backend=options.backend, model=options.model,
+        max_turns=options.max_turns, budget_usd=options.budget_usd,
+        token_budget=options.token_budget, timeout=options.timeout_s, max_repairs=options.max_repairs)
+    _run_blender(args, workspace, settings, output)
+    return output / ('patient_twin.yaml' if settings['manifest'] is not None else Path(settings['source']).name)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Optionally edit an existing pipeline output; generation itself is unchanged."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -290,6 +349,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if command == 'edit':
             settings = prepare(args.input, workspace, vessel_names=args.vessel_names)
+            from ..references import parse_references
+            from ..refinement import prepare_references
+            references = parse_references(args.anatomy_reference)
+            from .prompts import build_prompt
+            args.prompt = build_prompt(args.agent_task, args.agent_target, args.prompt,
+                                       references=references, major_branching=args.include_major_branches)
+            for name in args.agent_target or references:
+                if '/HumanBody/Anatomy/' + name not in settings['paths']:
+                    raise ValueError(f'Agent target is not in the patient asset: {name}')
+            if references or args.include_major_branches:
+                args.prompt += prepare_references(workspace, references, args.include_major_branches,
+                                                  args.fragment_area_mm2, operation=args.agent_task)
+                settings = load_workspace(workspace)
+            (workspace / 'task_prompt.txt').write_text(args.prompt)
         else:
             settings = load_workspace(workspace, vessel_names=args.vessel_names)
         needs_export = (command != 'finalize' or not edited.is_file()

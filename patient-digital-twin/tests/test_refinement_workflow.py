@@ -18,6 +18,7 @@ from patient_digital_twin import (
     prepare_surface,
 )
 from patient_digital_twin.scan_volume import from_array
+from pxr import Usd, UsdGeom
 
 
 @pytest.fixture
@@ -80,6 +81,61 @@ def test_texture_cache_reuses_completed_inference_and_rejects_changed_triangles(
 
 
 
+def test_reference_completion_validation_and_provenance(body, tmp_path):
+    import shutil
+
+    from patient_digital_twin.agent.assets import finalize, prepare
+    from patient_digital_twin.refinement import prepare_references
+
+    reference = tmp_path / 'reference'
+    reference.mkdir()
+    (reference / 'reference.glb').write_bytes(b'fixture reference')
+    (reference / 'LICENSE.txt').write_text('CC BY 4.0 fixture')
+    (reference / 'source.json').write_text('{}')
+    (reference / 'ATTRIBUTION.txt').write_text('Fixture author')
+    (reference / 'structures.json').write_text('{}')
+    metadata = dict(id='fixture', file='reference.glb', units='meters', up_axis='Y',
+                    sha256=hashlib.sha256(b'fixture reference').hexdigest(),
+                    license={'spdx': 'CC-BY-4.0', 'text': 'LICENSE.txt'},
+                    source={'evidence': 'source.json', 'url': 'https://example.org/reference'},
+                    structures='structures.json', selections={'liver_main': ['liver']},
+                    attribution='Fixture author', changes='Fixture generated')
+    (reference / 'metadata.json').write_text(json.dumps(metadata))
+    source = body.export_to_usd(tmp_path / 'input.usdc')
+    workspace = tmp_path / 'edit'
+    prepare(source, workspace)
+    prompt = prepare_references(workspace, {'liver': reference / 'metadata.json'})
+    assert 'liver' in prompt
+    shutil.copy2(workspace / 'input.usdc', workspace / 'edited.usdc')
+    with pytest.raises(ValueError, match="completion.json"):
+        finalize(workspace, tmp_path / 'missing-report')
+    (workspace / 'completion.json').write_text(json.dumps({'liver': {
+        'generated_regions': [], 'removed_fragments': [], 'retained_fragments': [], 'uncertainties': []}}))
+    with pytest.raises(ValueError, match='reference_review'):
+        finalize(workspace, tmp_path / 'missing-inspection')
+    from PIL import Image
+    for name in ('reference.png', 'result.png'):
+        Image.new('RGB', (16, 16)).save(workspace / name)
+    entry = json.loads((workspace / 'completion.json').read_text())
+    entry['liver']['reference_review'] = dict(
+        observed_features=['Fixture contour'], preserved_features=['Fixture contour'],
+        generated_features=[], unresolved_features=[],
+        reference_images=['reference.png'], result_images=['../external.png'])
+    (workspace / 'completion.json').write_text(json.dumps(entry))
+    with pytest.raises(ValueError, match='missing or external comparison image'):
+        finalize(workspace, tmp_path / 'external-inspection')
+    entry['liver']['reference_review']['result_images'] = ['result.png']
+    (workspace / 'completion.json').write_text(json.dumps(entry))
+    output = finalize(workspace, tmp_path / 'final')
+    report = json.loads((output.parent / 'refinement/report.json').read_text())
+    assert report['structures']['liver']['validation']['connected_components'] == 1
+    assert (output.parent / 'refinement/references/liver/ATTRIBUTION.txt').is_file()
+    review = report['structures']['liver']['reference_review']
+    for relative in review['reference_images'] + review['result_images']:
+        assert (output.parent / 'refinement' / relative).is_file()
+
+
+
 def test_texture_palette_matches_reference_without_flattening_detail():
     from patient_digital_twin.texturing._trellis import match_tile_palette
     from PIL import Image
@@ -109,6 +165,30 @@ def test_default_smoothing_reduces_voxel_steps_without_large_volume_drift():
     assert after['p95_adjacent_normal_angle_deg'] < .55 * before['p95_adjacent_normal_angle_deg']
     assert abs(after['volume_mm3'] / before['volume_mm3'] - 1) < .02
     assert after['watertight'] and after['euler_characteristic'] == before['euler_characteristic'] == 2
+
+
+
+def test_colon_shape_gate_rejects_connected_surface_with_handles(tmp_path):
+    import trimesh
+    from patient_digital_twin.refinement import validate_completion
+
+    stage = Usd.Stage.CreateInMemory()
+    mesh = UsdGeom.Mesh.Define(stage, '/HumanBody/Anatomy/colon')
+    settings = {'references': {'colon': {'target': str(mesh.GetPath()), 'metadata': {'id': 'fixture'}}},
+                'completion': {'require_colon_shape': True}}
+    (tmp_path / 'completion.json').write_text(json.dumps({'colon': {
+        'generated_regions': [], 'removed_fragments': [], 'retained_fragments': [], 'uncertainties': []}}))
+    for surface in (trimesh.creation.torus(major_radius=.02, minor_radius=.005),
+                    trimesh.creation.icosphere(subdivisions=2, radius=.02)):
+        mesh.CreatePointsAttr(surface.vertices.tolist())
+        mesh.CreateFaceVertexCountsAttr([3] * len(surface.faces))
+        mesh.CreateFaceVertexIndicesAttr(surface.faces.ravel().tolist())
+        if surface.euler_number != 2:
+            with pytest.raises(ValueError, match='repair holes/handles'):
+                validate_completion(stage, tmp_path, settings)
+        else:
+            report = validate_completion(stage, tmp_path, settings)
+            assert report['structures']['colon']['validation']['euler_characteristic'] == 2
 
 
 
@@ -166,6 +246,20 @@ def test_tissue_family_defaults_are_explicit_and_preserve_exact_overrides():
 
 
 
+def test_vessel_repair_guidance_is_scoped():
+    from patient_digital_twin.refinement import vessel_repair_guidance
+    assert vessel_repair_guidance(['colon', 'liver']) == ''
+    for name in ('aorta', 'inferior_vena_cava', 'superior_vena_cava',
+                 'iliac_artery_left', 'iliac_vena_right', 'common_carotid_artery_left',
+                 'subclavian_artery_right', 'pulmonary_vein', 'portal_vein_and_splenic_vein'):
+        prompt = vessel_repair_guidance([name], True)
+        assert name in prompt
+        assert 'Do not merge arteries with veins' in prompt
+        assert 'explicitly selected' in prompt
+        assert ('Expected groups:' in prompt) == (name == 'aorta')
+
+
+
 def test_non_aortic_major_branches_require_explicit_selection(tmp_path):
     from patient_digital_twin.references import load_references
     (tmp_path / 'reference.glb').write_bytes(b'fixture')
@@ -186,3 +280,43 @@ def test_non_aortic_major_branches_require_explicit_selection(tmp_path):
     path.write_text(json.dumps(metadata))
     with pytest.raises(ValueError, match='no named major branches for inferior_vena_cava'):
         load_references({'inferior_vena_cava': path}, include_major_branches=True)
+
+
+
+def test_vessel_branches_default_and_hra_coverage():
+    import csv
+
+    from patient_digital_twin.agent import AgentOptions
+    from patient_digital_twin.refinement import vessel_repair_guidance
+    assert AgentOptions(prompt='Inspect').include_major_branches is False
+    assert 'Expected groups:' not in vessel_repair_guidance(['aorta'])
+    assert 'Expected groups:' in vessel_repair_guidance(['aorta'], True)
+    assert 'explicitly selected' not in vessel_repair_guidance(['inferior_vena_cava'])
+    assert 'explicitly selected' in vessel_repair_guidance(['inferior_vena_cava'], True)
+    path = Path(__file__).parents[1] / 'assets/anatomy/hra/blood-vasculature-female-v1.3'
+    metadata = json.loads((path / 'metadata.json').read_text())
+    nodes = {row['node_name'] for row in csv.DictReader((path / 'structures.csv').open())}
+    for name in ('inferior_vena_cava', 'pulmonary_artery', 'celiac_trunk',
+                 'superior_mesenteric_artery', 'inferior_mesenteric_artery'):
+        for suffix in ('_main', '_major_branches'):
+            selected = metadata['selections'][name + suffix]
+            assert selected and set(selected) <= nodes
+
+
+
+def test_named_prompt_is_saved_and_sent_to_sdk(body, tmp_path, monkeypatch):
+    from patient_digital_twin.agent import AgentOptions
+    from patient_digital_twin.agent import __main__ as editor
+    captured = []
+    monkeypatch.setattr(editor, '_run_blender', lambda args, *rest: captured.append(args.prompt))
+    source = body.export_to_usd(tmp_path / 'input.usdc')
+    workspace = tmp_path / 'agent'
+    editor.edit_asset(source, tmp_path / 'out',
+                      AgentOptions(task='refine', targets=('liver',)), workspace=workspace)
+    saved = (workspace / 'task_prompt.txt').read_text()
+    assert captured == [saved]
+    assert 'Operation: refine.' in saved and 'Targets: liver.' in saved
+    assert 'without completing missing regions' in saved
+    (workspace / 'edited.blend').touch()
+    editor.resume_asset(workspace, tmp_path / 'out', AgentOptions(prompt='Continue'))
+    assert captured[-1] == saved

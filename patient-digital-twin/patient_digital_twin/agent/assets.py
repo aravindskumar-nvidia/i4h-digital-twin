@@ -16,6 +16,7 @@ from ..anatomy import Kind, is_vessel
 from ..body import _extract_mesh_centerline
 from ..export import _publish
 from ..geometry import (
+    centerline_spacing,
     native_centerline,
     transform_points,
     validate_triangles,
@@ -113,6 +114,11 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
     changed = [_merge_mesh(original.GetPrimAtPath(path), mesh) for path, mesh in zip(paths, meshes)]
     _merge_materials(original, edited, meshes, paths, settings['token'])
 
+    completion = None
+    if settings.get('references'):
+        from ..refinement import validate_completion
+        completion = validate_completion(original, workspace, settings)
+
     def write(folder):
         folder.mkdir()
         target = folder / source.name
@@ -140,6 +146,9 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
                 _merge_materials(standalone, edited, [m for m, _ in pairs], [p for _, p in pairs], settings['token'])
                 _copy_textures(standalone, workspace, folder)
                 standalone.Export(str(folder / companion.name))
+        if completion is not None:
+            from ..refinement import publish_provenance
+            publish_provenance(workspace, folder, completion)
         _copy_textures(original, workspace, target.parent)
         original.Export(str(target))
         reopened = Usd.Stage.Open(str(target))
@@ -184,11 +193,7 @@ def _merge_mesh(target, edited, *, local=False) -> bool:
             try:
                 old_graph = np.asarray(target.GetAttribute('centerline:points').Get())
                 edges = np.asarray(target.GetAttribute('centerline:edges').Get())
-                # Pipeline graphs connect 26-neighbor voxels on a local isotropic grid.
-                steps = old_graph[edges[:, 1]] - old_graph[edges[:, 0]]
-                spacing_m = float(np.median(np.max(np.abs(steps), axis=1))) * units
-                if not np.isfinite(spacing_m) or spacing_m <= 0:
-                    raise ValueError('Original centerline has invalid grid spacing')
+                spacing_m = centerline_spacing(old_graph, edges) * units
                 graph = _extract_mesh_centerline(points.astype(float) * units, faces, spacing_m)
             except ValueError as exc:
                 raise CenterlineRegenerationError(
@@ -204,7 +209,7 @@ def _merge_mesh(target, edited, *, local=False) -> bool:
             Sdf.CopySpec(source.GetRootLayer(), prop.GetPath(), stage.GetRootLayer(), target.GetPath().AppendProperty(name))
         attr = target.GetAttribute(name)
         if attr and attr.GetTypeName() == Sdf.ValueTypeNames.Normal3fArray and attr.Get():
-            normals = np.asarray(attr.Get()) @ np.linalg.inv(np.array(matrix)[:3, :3]).T
+            normals = np.asarray(attr.Get(), dtype=np.float64) @ np.linalg.inv(np.array(matrix, dtype=np.float64)[:3, :3]).T
             normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-30)
             attr.Set(Vt.Vec3fArray.FromNumpy(normals.astype(np.float32)))
     if geometry_changed:
@@ -262,7 +267,8 @@ def _copy_textures(stage, workspace, destination):
             name = hashlib.sha256(path.read_bytes()).hexdigest()[:16] + path.suffix
             texture = destination / 'textures' / name
             texture.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(path, texture)
+            if path.resolve() != texture.resolve():
+                shutil.copyfile(path, texture)
             attr.Set(Sdf.AssetPath('textures/' + name))
 
 

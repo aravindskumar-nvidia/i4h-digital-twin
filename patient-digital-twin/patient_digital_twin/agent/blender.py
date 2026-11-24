@@ -44,6 +44,30 @@ def open_asset(directory):
             obj.parent = None
             obj.matrix_world = Matrix.Identity(4)
     scene['i4h_session'] = settings['token']
+    for organ, reference in settings.get('references', {}).items():
+        reference_scene = bpy.data.scenes.new('I4H Reference ' + organ + ' ' + settings['token'])
+        reference_scene.render.engine = 'BLENDER_WORKBENCH'
+        bpy.context.window.scene = reference_scene
+        reference_scene.unit_settings.system = 'METRIC'
+        reference_scene.unit_settings.scale_length = 1.0
+        bpy.ops.import_scene.gltf(filepath=reference['file'])
+        keep = []
+        for obj in reference_scene.objects:
+            name, dot, suffix = obj.name.rpartition('.')
+            original_name = name if dot and suffix.isdigit() else obj.name
+            if obj.type == 'MESH' and original_name in reference['nodes']:
+                obj.data.transform(obj.matrix_world)
+                obj.parent = None
+                obj.matrix_world = Matrix.Identity(4)
+                keep.append(obj)
+        if not keep:
+            raise ValueError('No selected reference geometry for ' + organ)
+        for obj in list(reference_scene.objects):
+            if obj not in keep:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        reference_scene['i4h_reference'] = organ
+    bpy.context.window.scene = scene
+    bpy.context.view_layer.update()
     (folder / 'opened').touch()
 
 
@@ -54,7 +78,10 @@ def open_checkpoint(directory):
     folder = Path(directory)
     settings = json.loads((folder / 'edit.json').read_text())
     with bpy.data.libraries.load(str(folder / 'edited.blend'), link=False) as (source, loaded):
-        loaded.scenes = [settings.get('checkpoint_scene', 'I4H ' + settings['token'])]
+        target = settings.get('checkpoint_scene', 'I4H ' + settings['token'])
+        references = [name for name in source.scenes
+                      if name.startswith('I4H Reference ') and settings['token'] in name]
+        loaded.scenes = [target, *references]
     scene = loaded.scenes[0]
     if scene is None or scene.get('i4h_session') != settings['token']:
         raise ValueError('The Blender checkpoint does not contain this editing session')
