@@ -1,1 +1,2 @@
 patient-digital-twin/examples/data/s0011/ct.nii.gz filter=lfs diff=lfs merge=lfs -text
+patient-digital-twin/patient_digital_twin/data/textures/*.png filter=lfs diff=lfs merge=lfs -text

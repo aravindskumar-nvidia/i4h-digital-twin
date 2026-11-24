@@ -1,0 +1,94 @@
+{
+  "id": "voxel-man-colon-male-15882019",
+  "anatomy": "colon",
+  "sex": "male",
+  "description": "VOXEL-MAN Visible Human Male colon surface extracted from segmented 1 mm label images.",
+  "source": {
+    "provider": "VOXEL-MAN",
+    "url": "https://doi.org/10.5281/zenodo.15882019",
+    "version": "15882019",
+    "evidence": "../../provenance/voxel-man-record.json"
+  },
+  "creators": [
+    {
+      "name": "H\u00f6hne, Karl Heinz",
+      "affiliation": "University Medical Center Hamburg-Eppendorf",
+      "orcid": "0009-0005-4307-7731"
+    },
+    {
+      "name": "Pflesser, Bernhard",
+      "affiliation": "University Medical Center Hamburg-Eppendorf"
+    },
+    {
+      "name": "Pommert, Andreas",
+      "affiliation": "University Medical Center Hamburg-Eppendorf",
+      "orcid": "0000-0002-7557-8013"
+    },
+    {
+      "name": "Riemer, Martin",
+      "affiliation": "University Medical Center Hamburg-Eppendorf"
+    },
+    {
+      "name": "Schiemann, Thomas",
+      "affiliation": "University Medical Center Hamburg-Eppendorf"
+    },
+    {
+      "name": "Schubert, Rainer",
+      "affiliation": "University Medical Center Hamburg-Eppendorf",
+      "orcid": "0000-0002-8026-7500"
+    },
+    {
+      "name": "Schumacher, Udo",
+      "affiliation": "University Medical Center Hamburg-Eppendorf",
+      "orcid": "0000-0003-1494-5956"
+    },
+    {
+      "name": "Tiede, Ulf",
+      "affiliation": "University Medical Center Hamburg-Eppendorf"
+    }
+  ],
+  "attribution": "H\u00f6hne, Karl Heinz; Pflesser, Bernhard; Pommert, Andreas; Riemer, Martin; Schiemann, Thomas; Schubert, Rainer; Schumacher, Udo; Tiede, Ulf. Segmented Internal Organs of the Visible Human Male (2025), University Medical Center Hamburg-Eppendorf / VOXEL-MAN. https://doi.org/10.5281/zenodo.15882019",
+  "changes": "Selected labels extracted on the 1 mm grid; Gaussian sigma 0.6 voxel and marching cubes at 0.5. TIFF stack kji mapped to (i,j,-k) meters with reversed winding, then rotated to glTF Y-up by (x,y,z) -> (x,z,-y). Source TIFFs unchanged.",
+  "extraction": {
+    "labels": "structures.json",
+    "voxel_spacing_mm": [
+      1,
+      1,
+      1
+    ],
+    "gaussian_sigma_voxels": 0.6,
+    "marching_cubes_level": 0.5,
+    "original_array_mapping": "TIFF stack kji -> (i,j,-k) * 0.001 meters; extraction reverses triangle winding."
+  },
+  "structures": "structures.json",
+  "selections": {
+    "colon_regions": [
+      "colon"
+    ]
+  },
+  "limitations": [
+    "Label-derived colon, caecum and rectum",
+    "Extracted for reference viewing; connectivity and watertightness are not certified.",
+    "Haustral surface detail is visible, alongside 1 mm label-extraction stair-stepping. Use regional pouch morphology, not voxel ridges, as guidance; preserve the target patient course and report any inferred surface detail."
+  ],
+  "schema_version": 2,
+  "file": "reference.glb",
+  "format": "glTF 2.0 binary",
+  "units": "meters",
+  "up_axis": "Y",
+  "license": {
+    "spdx": "CC-BY-4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "text": "../../licenses/CC-BY-4.0.txt"
+  },
+  "intended_use": "Shape and topology guidance for agentic refinement of target anatomy; do not replace the target with this reference.",
+  "alignment": "Reference coordinates only; registration to each target is required.",
+  "preparation": {
+    "kind": "voxel-man-labels",
+    "url": "https://zenodo.org/api/records/15882019/files/VOXEL-MAN_segmented-internal-organs.zip/content",
+    "checksum": "md5:dbdfada24e69591bdf9650453918d9ef",
+    "label_directory": "VOXEL-MAN_segmented-internal-organs/labels",
+    "first_slice": 1256,
+    "slice_count": 774
+  }
+}

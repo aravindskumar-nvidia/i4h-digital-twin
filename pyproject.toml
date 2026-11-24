@@ -72,6 +72,7 @@ package-dir = { hospital_digital_twin = "hospital-digital-twin/hospital_digital_
 include-package-data = true
 
 [tool.setuptools.package-data]
+patient_digital_twin = ["data/textures/*.json", "data/textures/*.png"]
 sim_ready_assets = ["*.json"]
 
 [tool.pytest.ini_options]

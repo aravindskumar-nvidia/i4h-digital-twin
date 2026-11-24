@@ -1,0 +1,4 @@
+Höhne, Karl Heinz; Pflesser, Bernhard; Pommert, Andreas; Riemer, Martin; Schiemann, Thomas; Schubert, Rainer; Schumacher, Udo; Tiede, Ulf. Segmented Internal Organs of the Visible Human Male (2025), University Medical Center Hamburg-Eppendorf / VOXEL-MAN. https://doi.org/10.5281/zenodo.15882019
+Source: https://doi.org/10.5281/zenodo.15882019
+License: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+Changes: 1 mm label grid; Gaussian sigma 0.6 voxel and marching cubes at 0.5 for display; source TIFFs unchanged. Existing extracted XYZ-meter mesh rotated from Z-up to Y-up by (x,y,z) -> (x,z,-y), then encoded as GLB. No additional smoothing, repair or completion.

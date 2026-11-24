@@ -1,0 +1,74 @@
+{
+  "id": "hra-large-intestine-male-v1.3",
+  "anatomy": "colon",
+  "sex": "male",
+  "description": "HRA male large intestine with colon regions, caecum, rectum, ileocecal valve and appendix.",
+  "source": {
+    "provider": "Human Reference Atlas",
+    "url": "https://purl.humanatlas.io/ref-organ/large-intestine-male/v1.3",
+    "download_url": "https://cdn.humanatlas.io/digital-objects/ref-organ/large-intestine-male/v1.3/assets/3d-sbu-m-large-intestine.glb",
+    "version": "1.3",
+    "sha256": "908a5c38bf14574a673f2d2619502281f7f9e47c46c4eba837aae2e80e38c489",
+    "evidence": "../../provenance/hra-library.yaml"
+  },
+  "attribution": "Human Reference Atlas / HuBMAP CCF 3D Reference Object Library, based on the National Library of Medicine Visible Human data. Library credits and supplied citations are preserved in provenance/hra-library.yaml.",
+  "changes": "Original GLB bytes preserved; renamed to reference.glb. Original ontology crosswalk copied as structures.csv. No geometry edits. Crosswalk line endings normalized to LF.",
+  "structures": "structures.csv",
+  "selections": {
+    "colon_regions": [
+      "VH_M_ascending_colon",
+      "VH_M_descending_colon",
+      "VH_M_hepatic_flexure_of_colon",
+      "VH_M_sigmoid_colon",
+      "VH_M_splenic_flexure_of_colon",
+      "VH_M_transverse_colon"
+    ]
+  },
+  "limitations": [
+    "Reference parts are not certified to form a single connected or watertight mesh.",
+    "Available nodes describe source coverage; the major-branches option uses a documented subset of these arteries."
+  ],
+  "schema_version": 2,
+  "file": "reference.glb",
+  "format": "glTF 2.0 binary",
+  "units": "meters",
+  "up_axis": "Y",
+  "sha256": "908a5c38bf14574a673f2d2619502281f7f9e47c46c4eba837aae2e80e38c489",
+  "bytes": 687076,
+  "license": {
+    "spdx": "CC-BY-4.0",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "text": "../../licenses/CC-BY-4.0.txt"
+  },
+  "intended_use": "Shape and topology guidance for agentic refinement of target anatomy; do not replace the target with this reference.",
+  "alignment": "Reference coordinates only; registration to each target is required.",
+  "bounds_m": [
+    [
+      -0.11607681959867477,
+      -0.03889625519514084,
+      -0.08586498349905014
+    ],
+    [
+      0.1430491805076599,
+      0.4114046096801758,
+      0.13897916674613953
+    ]
+  ],
+  "geometry_count": 10,
+  "library_credits": [
+    "Kristen Browne",
+    "Leonard E. Cross",
+    "Bruce W. Herr II",
+    "Elizabeth G. Record",
+    "Ellen M. Quardokus",
+    "Andreas Bueckle",
+    "Katy Börner",
+    "Heidi Schlehlein"
+  ],
+  "credit_scope": "Library contributors named in the preserved HRA source-manifest citation section; not an assertion of individual authorship of each mesh.",
+  "preparation": {
+    "kind": "download-glb",
+    "url": "https://cdn.humanatlas.io/digital-objects/ref-organ/large-intestine-male/v1.3/assets/3d-sbu-m-large-intestine.glb",
+    "checksum": "sha256:908a5c38bf14574a673f2d2619502281f7f9e47c46c4eba837aae2e80e38c489"
+  }
+}

@@ -1,0 +1,121 @@
+source_url: https://humanatlas.io/3d-reference-library
+source_document_sha256: eb95d19acce0b469b05ae8be9a5484583bc95e6fcea5ab2fc743dd48944eaed3
+changes: 'Excerpt of the downloaded HRA page manifest: selected organ entries and complete license, terms and citation
+  sections; unrelated organ/release listings omitted.'
+release:
+  version: '11'
+  label: 11th Release (v2.5)
+  date: June 2026
+  crosswalkUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/asct-b-3d-models-crosswalk/v1.10/assets/asct-b-3d-models-crosswalk.csv
+organData:
+- label: Blood Vasculature
+  icon: organ:blood-vasculature
+  cards:
+  - label: Female
+    alt: Blood Vasculature, Female
+    fileUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/blood-vasculature-female/v1.3/assets/3d-vh-f-blood-vasculature.glb
+    sourceDataUrl: https://purl.humanatlas.io/ref-organ/blood-vasculature-female/v1.3
+    crosswalkUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/blood-vasculature-female/v1.3/assets/crosswalk.csv
+    files: []
+  - label: Male
+    alt: Blood Vasculature, Male
+    fileUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/blood-vasculature-male/v1.3/assets/3d-vh-m-blood-vasculature.glb
+    sourceDataUrl: https://purl.humanatlas.io/ref-organ/blood-vasculature-male/v1.3
+    crosswalkUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/blood-vasculature-male/v1.3/assets/crosswalk.csv
+    files: []
+- label: Large Intestine
+  icon: organ:large-intestine
+  cards:
+  - label: Female
+    alt: Large Intestine, Female
+    fileUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/large-intestine-female/v1.3/assets/3d-sbu-f-large-intestine.glb
+    sourceDataUrl: https://purl.humanatlas.io/ref-organ/large-intestine-female/v1.3
+    crosswalkUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/large-intestine-female/v1.3/assets/crosswalk.csv
+    files: []
+  - label: Male
+    alt: Large Intestine, Male
+    fileUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/large-intestine-male/v1.3/assets/3d-sbu-m-large-intestine.glb
+    sourceDataUrl: https://purl.humanatlas.io/ref-organ/large-intestine-male/v1.3
+    crosswalkUrl: https://cdn.humanatlas.io/digital-objects/ref-organ/large-intestine-male/v1.3/assets/crosswalk.csv
+    files: []
+content:
+- component: PageSection
+  tagline: License
+  anchor: license
+  level: 2
+  content:
+  - component: Markdown
+    data: 'All HRA 3D reference objects are released under [Attribution 4.0 International (CC BY 4.0).](https://creativecommons.org/licenses/by/4.0/)
+
+      '
+- component: PageSection
+  tagline: Terms of use
+  anchor: terms-of-use
+  level: 2
+  content:
+  - component: Markdown
+    data: 'HuBMAP data are supplied with no warranties, expressed or implied, including without limitation,
+
+      any warranty of merchantability or fitness for a particular purpose or non-infringement.
+
+      No warranty with respect to the HuBMAP infrastructure is provided, including without limitation,
+
+      any uptime warranty. The Parties make no representations that the use of the data will not infringe any patent
+      or
+
+      proprietary rights of third parties.
+
+      '
+- component: PageSection
+  tagline: Citation
+  anchor: citation
+  level: 2
+  content:
+  - component: Markdown
+    data: 'If you use the data files v1.0 release, please cite this effort as follows:
+
+
+      Browne, Kristen, Leonard E. Cross, Bruce W. Herr II, Elizabeth G. Record, Ellen M. Quardokus, Andreas Bueckle,
+      and Katy Börner.
+
+      2021. [HuBMAP CCF 3D Reference Object Library.](https://humanatlas.io/3d-reference-library?version=2.2&organ=All%20Organs)
+      Accessed March 12, 2021.
+
+
+      If you use the data files v1.1 release, please cite this effort as follows:
+
+
+      Browne, Kristen, Leonard E. Cross, Bruce W. Herr II, Elizabeth G. Record, Ellen M. Quardokus, Andreas Bueckle,
+      and Katy Börner.
+
+      2021. [HuBMAP CCF 3D Reference Object Library.](https://humanatlas.io/3d-reference-library?version=2.2&organ=All%20Organs)
+      Accessed December 1, 2021.
+
+
+      If you use the data files v1.2 release, please cite this effort as follows:
+
+
+      Schlehlein, Heidi, Bruce W. Herr II, Ellen M. Quardokus, Andreas Bueckle, and Katy Börner. 2022. [HuBMAP CCF
+      3D Reference Object Library.](https://humanatlas.io/3d-reference-library?version=2.2&organ=All%20Organs)
+
+      Accessed May 06, 2022.
+
+
+      If you use the data files v1.3 release, please cite this effort as follows:
+
+
+      Schlehlein, Heidi, Bruce W. Herr II, Ellen M. Quardokus, Andreas Bueckle, and Katy Börner. 2022. [HuBMAP CCF
+      3D Reference Object Library.](https://humanatlas.io/3d-reference-library?version=2.2&organ=All%20Organs)
+
+      Accessed December 15, 2022.
+
+
+      If you use the data files v1.4 release, please cite this effort as follows:
+
+
+      Schlehlein, Heidi, Bruce W. Herr II, Ellen M. Quardokus, Andreas Bueckle, and Katy Börner. 2023. [HuBMAP CCF
+      3D Reference Object Library.](https://humanatlas.io/3d-reference-library?version=2.2&organ=All%20Organs)
+
+      Accessed June 1, 2023.
+
+      '

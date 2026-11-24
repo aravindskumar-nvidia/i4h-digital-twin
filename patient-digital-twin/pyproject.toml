@@ -63,3 +63,6 @@ files = ["patient_digital_twin"]
 exclude = ["patient_digital_twin/scan_volume\\.py"]  # Kept byte-identical with sensor-simulation.
 ignore_missing_imports = true
 follow_imports = "silent"
+
+[tool.setuptools.package-data]
+patient_digital_twin = ["data/textures/*.json", "data/textures/*.png"]

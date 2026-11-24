@@ -12,9 +12,10 @@ from .importers import (
     SegmentationImporter,
     SimpleImporter,
 )
+from .references import TextureReference
 
 __all__ = [
     "AnatomicalStructure", "AnatomyCollection", "CenterlineGraph", "HumanBody", "ImagingVolume",
     "Kind", "MeshGeometry", "NVGenerateImporter", "NVSegmentImporter", "SegmentationImporter",
-    "SimpleImporter", "System",
+    "SimpleImporter", "System", "TextureReference",
 ]

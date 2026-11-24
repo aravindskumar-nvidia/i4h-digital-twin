@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "references": [
+    {
+      "id": "hra-blood-vasculature-male-v1.3",
+      "description": "HRA male blood vasculature with aorta, named arteries and veins.",
+      "metadata": "hra/blood-vasculature-male-v1.3/metadata.json"
+    },
+    {
+      "id": "hra-blood-vasculature-female-v1.3",
+      "description": "HRA female blood vasculature with aorta, named arteries and veins.",
+      "metadata": "hra/blood-vasculature-female-v1.3/metadata.json"
+    },
+    {
+      "id": "hra-large-intestine-male-v1.3",
+      "description": "HRA male large intestine with colon regions, caecum, rectum, ileocecal valve and appendix.",
+      "metadata": "hra/large-intestine-male-v1.3/metadata.json"
+    },
+    {
+      "id": "hra-large-intestine-female-v1.3",
+      "description": "HRA female large intestine with colon regions, caecum, rectum, ileocecal valve and appendix.",
+      "metadata": "hra/large-intestine-female-v1.3/metadata.json"
+    },
+    {
+      "id": "voxel-man-aorta-male-15882019",
+      "description": "VOXEL-MAN Visible Human Male aorta surface extracted from segmented 1 mm label images.",
+      "metadata": "voxel-man/aorta-male-15882019/metadata.json"
+    },
+    {
+      "id": "voxel-man-colon-male-15882019",
+      "description": "VOXEL-MAN Visible Human Male colon surface extracted from segmented 1 mm label images.",
+      "metadata": "voxel-man/colon-male-15882019/metadata.json"
+    }
+  ]
+}
