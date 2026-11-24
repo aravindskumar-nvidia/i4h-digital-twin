@@ -48,8 +48,8 @@ def _checked_blender(executable: str) -> str:
     return executable
 
 
-def ensure_blender() -> str:
-    """Use compatible Blender or ask before installing the verified Linux x64 release."""
+def ensure_blender(*, install: bool = False) -> str:
+    """Reuse Blender; setup explicitly installs it, otherwise ask before downloading."""
     requested = os.environ.get('BLENDER_EXECUTABLE')
     executable = shutil.which(requested or 'blender')
     if executable:
@@ -62,7 +62,7 @@ def ensure_blender() -> str:
     destination = cache / f'blender-{BLENDER_VERSION}-linux-x64'
     if (destination / 'blender').is_file():
         return _checked_blender(str(destination / 'blender'))
-    if os.environ.get('I4H_INSTALL_BLENDER') == '1':
+    if install or os.environ.get('I4H_INSTALL_BLENDER') == '1':
         answer = 'y'
     else:
         try:

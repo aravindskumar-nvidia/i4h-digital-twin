@@ -7,3 +7,6 @@ __pycache__/
 build/
 dist/
 /output/
+
+# Fresh local dependency sources and downloads
+/.deps/

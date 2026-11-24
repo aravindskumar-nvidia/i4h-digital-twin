@@ -20,6 +20,7 @@ Main functions:
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
@@ -147,7 +148,8 @@ def run_pipeline(
 
 def parser() -> argparse.ArgumentParser:
     """Build the CLI parser; ``vars(parser().parse_args())`` matches ``run_pipeline``'s keywords."""
-    result = argparse.ArgumentParser(description=__doc__)
+    result = argparse.ArgumentParser(description=__doc__,
+        epilog='Prepare optional components: patient-digital-twin setup {editing,texture}')
     result.add_argument("--source", required=True, choices=("nvgenerate", "nvsegment"))
     result.add_argument("--input", type=Path, help="CT/MR NIfTI, DICOM CT directory, or volume.yaml (nvsegment)")
     result.add_argument("--classes", nargs="+", required=True, help="Named anatomy classes (spaces or commas)")
@@ -164,6 +166,10 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point: run the pipeline and print the output path; option errors exit with status 2."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == 'setup':
+        from .setup import main as setup_main
+        return setup_main(argv[1:])
     cli = parser()
     try:
         result = run_pipeline(**vars(cli.parse_args(argv)))

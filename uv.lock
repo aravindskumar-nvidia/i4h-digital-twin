@@ -1588,6 +1588,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "pillow" },
     { name = "pydicom" },
     { name = "pytest" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1612,6 +1613,19 @@ patient-codex = [
 ]
 patient-dicom = [
     { name = "simpleitk" },
+]
+patient-editing = [
+    { name = "claude-agent-sdk" },
+    { name = "mcp" },
+    { name = "openai-codex" },
+    { name = "pillow" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "trimesh" },
+    { name = "usd-core", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "vtk" },
 ]
 patient-nvgenerate = [
     { name = "einops" },
@@ -1649,6 +1663,16 @@ patient-pipeline = [
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "vtk" },
 ]
+patient-texture = [
+    { name = "pillow" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "trimesh" },
+    { name = "usd-core", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "vtk" },
+]
 patient-usd = [
     { name = "usd-core", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
@@ -1669,6 +1693,7 @@ patient-vasculature = [
 requires-dist = [
     { name = "boto3" },
     { name = "claude-agent-sdk", marker = "extra == 'patient-claude'", specifier = ">=0.2.154,<0.3" },
+    { name = "claude-agent-sdk", marker = "extra == 'patient-editing'", specifier = ">=0.2.154,<0.3" },
     { name = "einops", marker = "extra == 'patient-nvgenerate'", specifier = ">=0.7" },
     { name = "einops", marker = "extra == 'patient-nvsegment'", specifier = ">=0.7" },
     { name = "fire", marker = "extra == 'patient-nvgenerate'", specifier = ">=0.5" },
@@ -1680,12 +1705,17 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'patient-agent'", specifier = ">=1.26,<2" },
     { name = "mcp", marker = "extra == 'patient-claude'", specifier = ">=1.26,<2" },
     { name = "mcp", marker = "extra == 'patient-codex'", specifier = ">=1.26,<2" },
+    { name = "mcp", marker = "extra == 'patient-editing'", specifier = ">=1.26,<2" },
     { name = "monai", marker = "extra == 'patient-nvgenerate'", specifier = ">=1.5" },
     { name = "monai", marker = "extra == 'patient-nvsegment'", specifier = ">=1.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "nibabel", specifier = ">=5.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "openai-codex", marker = "extra == 'patient-codex'", specifier = ">=0.163,<0.164" },
+    { name = "openai-codex", marker = "extra == 'patient-editing'", specifier = ">=0.163,<0.164" },
+    { name = "pillow", marker = "extra == 'dev'", specifier = ">=10" },
+    { name = "pillow", marker = "extra == 'patient-editing'", specifier = ">=10" },
+    { name = "pillow", marker = "extra == 'patient-texture'", specifier = ">=10" },
     { name = "pydicom", marker = "extra == 'dev'", specifier = ">=2.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytorch-ignite", marker = "extra == 'patient-nvsegment'", specifier = ">=0.5" },
@@ -1694,9 +1724,11 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.22" },
     { name = "scikit-image", marker = "extra == 'patient-vasculature'", specifier = ">=0.22" },
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "scipy", marker = "extra == 'patient-editing'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'patient-nvgenerate'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'patient-nvsegment'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'patient-pipeline'", specifier = ">=1.10" },
+    { name = "scipy", marker = "extra == 'patient-texture'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'patient-vasculature'", specifier = ">=1.10" },
     { name = "simpleitk", marker = "extra == 'dev'", specifier = ">=2.3.0" },
     { name = "simpleitk", marker = "extra == 'patient-dicom'", specifier = ">=2.3.0" },
@@ -1709,18 +1741,26 @@ requires-dist = [
     { name = "tqdm", marker = "extra == 'patient-nvgenerate'", specifier = ">=4.65" },
     { name = "tqdm", marker = "extra == 'patient-nvsegment'", specifier = ">=4.65" },
     { name = "trimesh", marker = "extra == 'dev'" },
+    { name = "trimesh", marker = "extra == 'patient-editing'" },
+    { name = "trimesh", marker = "extra == 'patient-texture'" },
     { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'dev') or (sys_platform != 'linux' and extra == 'dev')", specifier = ">=24.3" },
+    { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'patient-editing') or (sys_platform != 'linux' and extra == 'patient-editing')", specifier = ">=24.3" },
     { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'patient-pipeline') or (sys_platform != 'linux' and extra == 'patient-pipeline')", specifier = ">=24.3" },
+    { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'patient-texture') or (sys_platform != 'linux' and extra == 'patient-texture')", specifier = ">=24.3" },
     { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'patient-usd') or (sys_platform != 'linux' and extra == 'patient-usd')", specifier = ">=24.3" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'dev'", specifier = ">=2.2" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'patient-editing'", specifier = ">=2.2" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'patient-pipeline'", specifier = ">=2.2" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'patient-texture'", specifier = ">=2.2" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'patient-usd'", specifier = ">=2.2" },
     { name = "vtk", marker = "extra == 'dev'" },
+    { name = "vtk", marker = "extra == 'patient-editing'" },
     { name = "vtk", marker = "extra == 'patient-pipeline'" },
+    { name = "vtk", marker = "extra == 'patient-texture'" },
     { name = "vtk", marker = "extra == 'patient-vasculature'", specifier = ">=9.2" },
     { name = "warp-lang", marker = "extra == 'patient-vasculature'", specifier = ">=1.3" },
 ]
-provides-extras = ["patient-dicom", "patient-agent", "patient-claude", "patient-codex", "patient-nvsegment", "patient-nvgenerate", "patient-pipeline", "dev", "patient-usd", "patient-vasculature"]
+provides-extras = ["patient-texture", "patient-editing", "patient-dicom", "patient-agent", "patient-claude", "patient-codex", "patient-nvsegment", "patient-nvgenerate", "patient-pipeline", "dev", "patient-usd", "patient-vasculature"]
 
 [[package]]
 name = "dipy"

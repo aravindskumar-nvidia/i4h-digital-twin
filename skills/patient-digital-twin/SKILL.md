@@ -44,9 +44,10 @@ for i4h-workflows, using only the documented `patient_digital_twin` API and CLI.
 uv pip install './patient-digital-twin[pipeline]'   # USD export + VTK/SciPy centerlines
 ```
 
-Extras: `pipeline` (usd-core, vtk, scipy), `usd`, `dicom` (SimpleITK), `nvsegment`,
+Extras: `pipeline` (USD, VTK, SciPy), `editing` (pipeline, mesh processing and both agent SDKs),
+`texture` (pipeline and mesh/image processing; `patient-digital-twin setup texture` installs TRELLIS.2), `usd`, `dicom` (SimpleITK), `nvsegment`,
 `nvgenerate` (inference dependencies only; model checkouts and weights are separate),
-and `dev` (pytest). STL/OBJ import needs `trimesh`. The root aggregate package uses
+and `dev` (pytest). Run `patient-digital-twin setup editing` after installing `editing` to prepare Blender. The root aggregate package uses
 the same extras prefixed with `patient-`. `usd-core` does not install Isaac Sim.
 
 ## Task → call

@@ -4464,6 +4464,7 @@ codex = [
 ]
 dev = [
     { name = "mypy" },
+    { name = "pillow" },
     { name = "pydicom" },
     { name = "pytest" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -4477,6 +4478,19 @@ dev = [
 ]
 dicom = [
     { name = "simpleitk" },
+]
+editing = [
+    { name = "claude-agent-sdk" },
+    { name = "mcp" },
+    { name = "openai-codex" },
+    { name = "pillow" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "trimesh" },
+    { name = "usd-core", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "vtk" },
 ]
 nvgenerate = [
     { name = "einops" },
@@ -4514,6 +4528,16 @@ pipeline = [
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "vtk" },
 ]
+texture = [
+    { name = "pillow" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "trimesh" },
+    { name = "usd-core", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
+    { name = "vtk" },
+]
 usd = [
     { name = "usd-core", marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
@@ -4533,6 +4557,7 @@ vasculature = [
 [package.metadata]
 requires-dist = [
     { name = "claude-agent-sdk", marker = "extra == 'claude'", specifier = ">=0.2.154,<0.3" },
+    { name = "claude-agent-sdk", marker = "extra == 'editing'", specifier = ">=0.2.154,<0.3" },
     { name = "einops", marker = "extra == 'nvgenerate'", specifier = ">=0.7" },
     { name = "einops", marker = "extra == 'nvsegment'", specifier = ">=0.7" },
     { name = "fire", marker = "extra == 'nvgenerate'", specifier = ">=0.5" },
@@ -4544,12 +4569,17 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'agent'", specifier = ">=1.26,<2" },
     { name = "mcp", marker = "extra == 'claude'", specifier = ">=1.26,<2" },
     { name = "mcp", marker = "extra == 'codex'", specifier = ">=1.26,<2" },
+    { name = "mcp", marker = "extra == 'editing'", specifier = ">=1.26,<2" },
     { name = "monai", marker = "extra == 'nvgenerate'", specifier = ">=1.5" },
     { name = "monai", marker = "extra == 'nvsegment'", specifier = ">=1.5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "nibabel", specifier = ">=5.0" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "openai-codex", marker = "extra == 'codex'", specifier = ">=0.163,<0.164" },
+    { name = "openai-codex", marker = "extra == 'editing'", specifier = ">=0.163,<0.164" },
+    { name = "pillow", marker = "extra == 'dev'", specifier = ">=10" },
+    { name = "pillow", marker = "extra == 'editing'", specifier = ">=10" },
+    { name = "pillow", marker = "extra == 'texture'", specifier = ">=10" },
     { name = "pydicom", marker = "extra == 'dev'", specifier = ">=2.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytorch-ignite", marker = "extra == 'nvsegment'", specifier = ">=0.5" },
@@ -4557,9 +4587,11 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.22" },
     { name = "scikit-image", marker = "extra == 'vasculature'", specifier = ">=0.22" },
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "scipy", marker = "extra == 'editing'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'nvgenerate'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'nvsegment'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'pipeline'", specifier = ">=1.10" },
+    { name = "scipy", marker = "extra == 'texture'", specifier = ">=1.10" },
     { name = "scipy", marker = "extra == 'vasculature'", specifier = ">=1.10" },
     { name = "simpleitk", marker = "extra == 'dev'", specifier = ">=2.3.0" },
     { name = "simpleitk", marker = "extra == 'dicom'", specifier = ">=2.3.0" },
@@ -4571,18 +4603,26 @@ requires-dist = [
     { name = "tqdm", marker = "extra == 'nvgenerate'", specifier = ">=4.65" },
     { name = "tqdm", marker = "extra == 'nvsegment'", specifier = ">=4.65" },
     { name = "trimesh", marker = "extra == 'dev'" },
+    { name = "trimesh", marker = "extra == 'editing'" },
+    { name = "trimesh", marker = "extra == 'texture'" },
     { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'dev') or (sys_platform != 'linux' and extra == 'dev')", specifier = ">=24.3" },
+    { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'editing') or (sys_platform != 'linux' and extra == 'editing')", specifier = ">=24.3" },
     { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'pipeline') or (sys_platform != 'linux' and extra == 'pipeline')", specifier = ">=24.3" },
+    { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'texture') or (sys_platform != 'linux' and extra == 'texture')", specifier = ">=24.3" },
     { name = "usd-core", marker = "(platform_machine != 'aarch64' and extra == 'usd') or (sys_platform != 'linux' and extra == 'usd')", specifier = ">=24.3" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'dev'", specifier = ">=2.2" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'editing'", specifier = ">=2.2" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'pipeline'", specifier = ">=2.2" },
+    { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'texture'", specifier = ">=2.2" },
     { name = "usd-exchange", marker = "platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'usd'", specifier = ">=2.2" },
     { name = "vtk", marker = "extra == 'dev'" },
+    { name = "vtk", marker = "extra == 'editing'" },
     { name = "vtk", marker = "extra == 'pipeline'" },
+    { name = "vtk", marker = "extra == 'texture'" },
     { name = "vtk", marker = "extra == 'vasculature'", specifier = ">=9.2" },
     { name = "warp-lang", marker = "extra == 'vasculature'", specifier = ">=1.3" },
 ]
-provides-extras = ["dicom", "agent", "claude", "codex", "nvsegment", "nvgenerate", "pipeline", "dev", "usd", "vasculature"]
+provides-extras = ["texture", "editing", "dicom", "agent", "claude", "codex", "nvsegment", "nvgenerate", "pipeline", "dev", "usd", "vasculature"]
 
 [[package]]
 name = "pillow"

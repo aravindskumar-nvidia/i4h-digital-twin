@@ -20,17 +20,48 @@ flowchart LR
 
 ## Install
 
-Python 3.10+, from the repository root:
+Python 3.10+, from the repository root. For anatomy import/export and agent editing:
 
 ```bash
-pip install -e './patient-digital-twin[pipeline]'
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e './patient-digital-twin[editing]'
+patient-digital-twin setup editing
 ```
 
-The `pipeline` extra supplies USD and skeleton-centerline dependencies for the segmentation and export
-examples below. For mesh extraction alone, install `./patient-digital-twin`.
+The `editing` extra includes the complete import/export pipeline, mesh processing,
+and both Codex and Claude SDKs. `setup` reuses compatible Blender or installs the
+verified release on Linux x86_64, then finds it automatically on later runs.
+There is no need to set an executable path. Authenticate your chosen agent backend
+before editing. Other platforms need Blender installed separately.
+On headless Ubuntu, setup reports if `sudo apt install xvfb xauth` is needed.
 
-For optional geometry, material and texture editing, see [Blender asset editing](docs/blender.md).
-Use [Claude/Codex orchestration](docs/agents.md) to automate the editing step.
+For **basic import/export only**, use `uv pip install -e './patient-digital-twin[pipeline]'`
+and skip `setup`. The four steps below work on CPU using the bundled masks.
+
+If you already have an active environment, skip its creation and activation.
+In a new terminal, run `source .venv/bin/activate` once. Then run installed commands
+normally, for example `patient-digital-twin --help` or `python your_script.py`.
+You do not need an `uv` prefix to run them.
+
+To add TRELLIS.2 texture generation in the same environment:
+
+```bash
+uv pip install -e './patient-digital-twin[texture]'
+patient-digital-twin setup texture
+```
+
+The `texture` extra includes the mesh and image dependencies. Setup installs and
+registers TRELLIS.2 automatically. It needs an NVIDIA GPU, CUDA development toolkit
+and C++ compiler; see [texture setup](docs/environment.md#texture-generation).
+
+Other input backends have separate setup:
+
+| Workflow | Setup |
+| --- | --- |
+| DICOM input | `uv pip install -e './patient-digital-twin[dicom]'` |
+| CT/MR model inference | [NV-Segment or NV-Generate](docs/environment.md#model-inference) |
+| Generated textures | [TRELLIS.2 and CUDA extensions](docs/environment.md#texture-generation) |
 
 ## 1. Load a segmentation and extract meshes
 
@@ -167,9 +198,9 @@ The CLI runs **NV-Segment** on an input image or **NV-Generate** to produce pair
 CT and labels. Both are optional; install only the backend you use:
 
 ```bash
-pip install -e './patient-digital-twin[pipeline,nvsegment]'
+uv pip install -e './patient-digital-twin[pipeline,nvsegment]'
 # Or:
-pip install -e './patient-digital-twin[pipeline,nvgenerate]'
+uv pip install -e './patient-digital-twin[pipeline,nvgenerate]'
 ```
 
 These extras install inference dependencies, not model source or weights. Provide
@@ -253,7 +284,7 @@ It installs with this package. Its optional features (DICOM, TotalSegmentator, V
 meshing) are in the `vasculature` extra:
 
 ```bash
-pip install -e './patient-digital-twin[vasculature]'
+uv pip install -e './patient-digital-twin[vasculature]'
 ```
 
 The package reorients CT into a canonical **LPS** frame (axis 0 toward Superior, axis 1

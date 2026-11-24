@@ -3,10 +3,11 @@
 Generate a patient USD or bundle normally, then optionally edit it with
 Claude/Codex and [Blender MCP](https://github.com/ahujasid/blender-mcp).
 
-From the repository root:
+In the active environment from the [patient install](../README.md#install), run from the repository root:
 
 ```bash
-uv pip install -e './patient-digital-twin[pipeline,codex]'
+uv pip install -e './patient-digital-twin[editing]'
+patient-digital-twin setup editing
 ```
 
 Authenticate Codex, then run (Blender starts automatically if needed):
@@ -56,7 +57,7 @@ USD is missing. `resume` opens that checkpoint for further agent edits. Both req
 a new output directory and the referenced source files, and retain the workspace.
 
 The returned USD or manifest is the new Isaac input; source and CT data are
-preserved. For Claude, install the `claude` extra and use `--backend claude`.
+preserved. For Claude, use `--backend claude`; its SDK is included in `editing`.
 
 See [Blender asset editing](blender.md) for supported edits and the output contract.
 Navigation uses the vessel selection saved in the bundle. Older bundles select
