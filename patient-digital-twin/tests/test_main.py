@@ -165,3 +165,24 @@ def test_bundle_centerline_uses_ct_grid_and_preserves_structure_graph(
         prim.GetAttribute("centerline:points").Get(), graph.points * 1000, rtol=1e-6
     )
     np.testing.assert_array_equal(prim.GetAttribute("centerline:edges").Get(), graph.edges)
+
+
+def test_all_classes_imports_detected_structures(monkeypatch, tmp_path):
+    image = nib.Nifti1Image(np.ones((9, 9, 9), np.uint8), np.eye(4))
+    ct = tmp_path / 'ct.nii.gz'
+    nib.save(image, ct)
+
+    def segment(self, *, names):
+        assert names is None
+        return segmentation_anatomy(image, {1: 'aorta', 2: 'colon'})
+
+    class CaptureWorkflow:
+        def run(self, body, output, **kwargs):
+            assert set(body.anatomy.structures) == {'aorta'}
+            assert kwargs['vessel_names'] == ()
+            return output
+
+    monkeypatch.setattr(main.NVSegmentImporter, 'to_anatomy_collection', segment)
+    output = main.run_pipeline(source='nvsegment', input=ct, classes=['all'],
+                               format='bundle', output=tmp_path / 'all', workflow=CaptureWorkflow())
+    assert output == tmp_path / 'all'

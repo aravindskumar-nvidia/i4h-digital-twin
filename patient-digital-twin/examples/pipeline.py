@@ -23,6 +23,10 @@ from tempfile import TemporaryDirectory
 import numpy as np
 from patient_digital_twin import HumanBody, SegmentationImporter
 from patient_digital_twin.__main__ import class_names
+from patient_digital_twin._refinement_cli import (
+    add_refinement_arguments,
+    pop_refinement_workflow,
+)
 from patient_digital_twin.importers import SimpleImporter
 from patient_digital_twin.scan_volume import from_nifti
 
@@ -41,6 +45,7 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--output", type=Path, required=True, help="New bundle directory")
     cli.add_argument("--anatomy", nargs="*", default=[], help="Optional anatomy subset")
     cli.add_argument("--centerline-spacing-mm", type=float, default=1.5)
+    add_refinement_arguments(cli)
     return cli
 
 
@@ -81,6 +86,7 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("--input is required for segmentation/simple and not accepted for sample")
     if (args.source == "segmentation") != (args.ct is not None):
         raise ValueError("--ct is required for, and only accepted with, segmentation input")
+    workflow = pop_refinement_workflow(vars(args).copy())
     print(f"Importing {args.source}", flush=True)
     body = import_body(args)
     requested = selected or set(body.anatomy.structures)
@@ -92,6 +98,14 @@ def run(args: argparse.Namespace) -> Path:
     }
     if not available:
         raise ValueError("No meshes for the requested anatomy")
+    if workflow is not None:
+        for name in list(body.anatomy.structures):
+            if name not in requested:
+                del body.anatomy.structures[name]
+        result = workflow.run(body, output, format='bundle', topology_names=available,
+                              centerline_spacing_mm=args.centerline_spacing_mm)
+        print(result, flush=True)
+        return result
     print("Extracting topology", flush=True)
     body.extract_topology(names=available, spacing_m=args.centerline_spacing_mm / 1000)
     for name in list(body.anatomy.structures):

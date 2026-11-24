@@ -134,7 +134,7 @@ flowchart LR
    `body_to_imaging`. The NV importers run their model, then hand the label NIfTI to
    `segmentation_anatomy`, which uses the same path. `SimpleImporter` loads meshes as-is.
 2. **Attach CT (optional).** `attach_scan` keeps the scan's native array order, frame
-   (RAS or LPS), and units; no resampling happens anywhere in the package.
+   (RAS or LPS), and units; attachment does not resample. Explicit scan-volume conversion can request resampling.
 3. **Topology (optional).** `extract_topology` voxelizes each vessel/airway mesh on a
    grid in its local frame and skeletonizes it, storing a `CenterlineGraph` on the
    structure.

@@ -209,3 +209,23 @@ def test_simple_stl_pipeline_without_imaging(pipeline, tmp_path):
     )
     np.testing.assert_allclose(points.min(0), mesh.vertices.min(0), atol=1e-7)
     np.testing.assert_allclose(points.max(0), mesh.vertices.max(0), atol=1e-7)
+
+
+def test_refinement_flags_preserve_example_pipeline_outputs(pipeline, monkeypatch, tmp_path):
+    import trimesh
+    from pxr import Usd
+
+    mesh = trimesh.creation.cylinder(radius=.005, height=.04, sections=16)
+    body = HumanBody(AnatomyCollection({'aorta': AnatomicalStructure(
+        'aorta', Kind.VESSEL, mesh.vertices, mesh.faces)}))
+    body.attach_imaging(np.ones((8, 8, 8), np.float32), voxel_to_imaging=np.diag([.001, .001, .001, 1]),
+                        body_to_imaging=np.eye(4))
+    monkeypatch.setattr(pipeline, 'import_body', lambda args: body)
+    baseline = pipeline.run(pipeline.parser().parse_args(['--source', 'sample', '--output', str(tmp_path / 'old')]))
+    refined = pipeline.run(pipeline.parser().parse_args([
+        '--source', 'sample', '--output', str(tmp_path / 'new'), '--no-cleanup']))
+    assert yaml.safe_load(baseline.read_text()) == yaml.safe_load(refined.read_text())
+    for name in ('human_body.usdc', 'patient_anatomy.usdc'):
+        original = Usd.Stage.Open(str(baseline.parent / name))
+        result = Usd.Stage.Open(str(refined.parent / name))
+        assert original.GetRootLayer().ExportToString() == result.GetRootLayer().ExportToString()

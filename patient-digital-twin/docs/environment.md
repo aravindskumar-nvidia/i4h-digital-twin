@@ -106,5 +106,10 @@ uv pip check
 
 For agent editing, also check `patient-digital-twin-agent --help`.
 
+Use the [run commands](run-commands.md) for generation, completion, repair,
+texturing and recovery. Supply your own CT or use the bundled sample.
+
 For subsequent terminals, activate the same environment and restore any environment
-variables you set above.
+variables you set above. Optionally set `I4H_REFERENCE_CACHE` to
+`$PWD/.deps/cache/references` to keep downloaded anatomy references in the repository's
+cache as well.

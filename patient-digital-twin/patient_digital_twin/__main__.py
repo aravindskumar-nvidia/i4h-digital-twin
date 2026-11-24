@@ -27,11 +27,13 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from ._refinement_cli import add_refinement_arguments, pop_refinement_workflow
 from .anatomy import CATALOG, canonical_name, is_vessel
 from .body import HumanBody
 from .export import USD_SUFFIXES
 from .importers import NVGenerateImporter, NVSegmentImporter
 from .scan_volume import ScanVolume
+from .workflow import PatientWorkflow
 
 
 def class_names(values: str | Iterable[str]) -> tuple[str, ...]:
@@ -76,12 +78,13 @@ def run_pipeline(
     python_executable: str | Path | None = None,
     centerline_spacing_mm: float = 1.5,
     series_uid: str | None = None,
+    workflow: PatientWorkflow | None = None,
 ) -> Path:
     """Run NV-Segment or NV-Generate and export only the requested anatomy.
 
     Args:
         source: ``"nvsegment"`` (requires ``input``) or ``"nvgenerate"`` (no ``input``).
-        classes: Catalog class names; every one must get a mesh or ``ValueError`` is raised.
+        classes: Catalog class names, or "all" for every detected supported structure.
         output: New ``.usd/.usda/.usdc`` file for ``format="usd"``, or new directory for ``"bundle"``.
         input: CT/MR NIfTI, DICOM CT directory, or ``volume.yaml``.
         format: ``"usd"`` or ``"bundle"`` (bundle needs CT and at least one vessel class).
@@ -97,7 +100,9 @@ def run_pipeline(
         ``run_pipeline(source="nvsegment", input="ct.nii.gz", classes=["aorta"], bundle_root=root,
         format="bundle", output="out")``
     """
-    names, modality = class_names(classes), modality.upper()
+    values = [classes] if isinstance(classes, str) else list(classes)
+    all_classes = values == ['all']
+    names, modality = (() if all_classes else class_names(values)), modality.upper()
     vessel_names = tuple(n for n in names if is_vessel(n))
     output = Path(output).expanduser().resolve()
     for failed, message in (
@@ -107,7 +112,7 @@ def run_pipeline(
         (not np.isfinite(centerline_spacing_mm) or centerline_spacing_mm <= 0,
          "centerline_spacing_mm must be finite and positive"),
         (format == "bundle" and modality != "CT", "bundle output requires CT in Hounsfield units"),
-        (format == "bundle" and not vessel_names, "bundle output requires at least one vessel class"),
+        (format == "bundle" and not all_classes and not vessel_names, "bundle output requires at least one vessel class"),
         (format == "usd" and output.suffix.lower() not in USD_SUFFIXES,
          "USD output must end with .usd, .usda or .usdc"),
         (source == "nvsegment" and input is None,
@@ -128,17 +133,27 @@ def run_pipeline(
         image.header.set_xyzt_units("meter")
         segmenter = NVSegmentImporter(image, bundle_root=bundle_root, modality=modality,
                                       python_executable=python_executable)
-        anatomy = segmenter.to_anatomy_collection(names=names)
+        anatomy = segmenter.to_anatomy_collection(names=None if all_classes else names)
         scan, source_path = (scan, str(input_path)) if modality == "CT" else (None, None)
     else:
         generator = NVGenerateImporter(source_root=source_root, python_executable=python_executable)
-        anatomy = generator.to_anatomy_collection(names=names)
+        anatomy = generator.to_anatomy_collection(names=None if all_classes else names)
         scan = generator.ct_scan
+    if all_classes:
+        names = tuple(n for n, structure in anatomy.structures.items() if not structure.is_empty)
+        if not names:
+            raise ValueError('No supported structures found in the model output')
+        # Whole-patient selection does not request vessel navigation.
+        anatomy.structures = {n: anatomy.structures[n] for n in names}
     if absent := [n for n in names if n not in anatomy.structures or anatomy.structures[n].is_empty]:
         raise ValueError(f"Requested classes have no mesh in the model output: {absent}")
     body = HumanBody(anatomy)
     if scan is not None:
         body.attach_scan(scan, source_path=source_path)
+    if workflow is not None:
+        return workflow.run(body, output, format=format, vessel_names=vessel_names,
+                            centerline_spacing_mm=centerline_spacing_mm,
+                            ct_exterior=format == 'bundle')
     if missing := [n for n in vessel_names if body.anatomy.structures[n].centerline is None]:
         body.extract_topology(names=missing, spacing_m=centerline_spacing_mm * 0.001)
     if format == "bundle":
@@ -147,12 +162,12 @@ def run_pipeline(
 
 
 def parser() -> argparse.ArgumentParser:
-    """Build the CLI parser; ``vars(parser().parse_args())`` matches ``run_pipeline``'s keywords."""
+    """Build importer, exporter, and optional refinement argument groups."""
     result = argparse.ArgumentParser(description=__doc__,
-        epilog='Prepare optional components: patient-digital-twin setup {editing,texture}')
+        epilog='Prepare editing: patient-digital-twin setup. Resume: patient-digital-twin resume --workspace RUN_DIRECTORY')
     result.add_argument("--source", required=True, choices=("nvgenerate", "nvsegment"))
     result.add_argument("--input", type=Path, help="CT/MR NIfTI, DICOM CT directory, or volume.yaml (nvsegment)")
-    result.add_argument("--classes", nargs="+", required=True, help="Named anatomy classes (spaces or commas)")
+    result.add_argument("--classes", nargs="+", required=True, help="Named anatomy classes (spaces or commas), or all detected supported structures")
     result.add_argument("--output", type=Path, required=True)
     result.add_argument("--series-uid", help="DICOM series to select when a directory contains several")
     result.add_argument("--format", choices=("usd", "bundle"), default="usd")
@@ -161,6 +176,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--source-root", type=Path, help="NV-Generate-CTMR checkout")
     result.add_argument("--python", dest="python_executable", help="Python interpreter for model inference")
     result.add_argument("--centerline-spacing-mm", type=float, default=1.5)
+    add_refinement_arguments(result)
     return result
 
 
@@ -170,9 +186,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if argv and argv[0] == 'setup':
         from .setup import main as setup_main
         return setup_main(argv[1:])
+    if argv and argv[0] == 'resume':
+        resume = argparse.ArgumentParser(description='Resume the full patient pipeline from its checkpoint')
+        resume.add_argument('--workspace', type=Path, required=True)
+        resume.add_argument('--output', type=Path)
+        resume.add_argument('--edited-asset', type=Path, help='Already published editor USD to continue from')
+        resume.add_argument('--token-budget', type=int)
+        resume.add_argument('--blender-mode', choices=['auto', 'virtual', 'existing'])
+        print(PatientWorkflow.resume(**vars(resume.parse_args(argv[1:]))))
+        return 0
     cli = parser()
     try:
-        result = run_pipeline(**vars(cli.parse_args(argv)))
+        options = vars(cli.parse_args(argv))
+        workflow = pop_refinement_workflow(options)
+        result = run_pipeline(**options, workflow=workflow)
     except (ValueError, FileNotFoundError, FileExistsError, ImportError) as exc:
         cli.error(str(exc))
     print(result)

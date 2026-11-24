@@ -23,11 +23,12 @@ from .importers import (
 from .references import TextureReference
 from .surface import CleanupOptions, CleanupResult, prepare_surface
 from .texturing import TextureOptions, TextureResult, TextureRuntime, texture_mesh
+from .workflow import PatientWorkflow
 
 __all__ = [
     "AnatomicalStructure", "AnatomyCollection", "CenterlineGraph", "HumanBody", "ImagingVolume",
     "Kind", "MeshGeometry", "NVGenerateImporter", "NVSegmentImporter", "SegmentationImporter",
-    "SimpleImporter", "System", "SurfaceMaterial", "AgentOptions",
+    "SimpleImporter", "System", "SurfaceMaterial", "PatientWorkflow", "AgentOptions",
     "CleanupOptions", "CleanupResult", "prepare_surface", "TextureOptions", "TextureRuntime",
     "TextureResult", "texture_mesh", "TextureReference",
 ]

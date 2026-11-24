@@ -8,17 +8,23 @@ from pathlib import Path
 import numpy as np
 import pytest
 from patient_digital_twin import (
+    AgentOptions,
     CleanupOptions,
     HumanBody,
     MeshGeometry,
+    PatientWorkflow,
     SegmentationImporter,
+    SurfaceMaterial,
     TextureOptions,
     TextureReference,
+    TextureResult,
     TextureRuntime,
     prepare_surface,
+    workflow,
 )
+from patient_digital_twin.agent import __main__ as agent_cli
 from patient_digital_twin.scan_volume import from_array
-from pxr import Usd, UsdGeom
+from pxr import Sdf, Usd, UsdGeom
 
 
 @pytest.fixture
@@ -32,7 +38,6 @@ def body():
     return patient
 
 
-
 def test_cleanup_is_independent_and_does_not_mutate(body):
     mesh = body.anatomy.structures['liver'].mesh
     before = mesh.vertices.copy()
@@ -41,6 +46,80 @@ def test_cleanup_is_independent_and_does_not_mutate(body):
     assert result.measurements['after']['watertight']
     assert result.mesh is not mesh
 
+
+@pytest.mark.parametrize('format', ['usd', 'bundle'])
+def test_default_workflow_never_starts_agent(body, tmp_path, monkeypatch, format):
+    def unexpected(*args, **kwargs):
+        pytest.fail('Default workflow started an agent')
+    monkeypatch.setattr(agent_cli, 'edit_asset', unexpected)
+    target = tmp_path / ('patient.usdc' if format == 'usd' else 'bundle')
+    output = PatientWorkflow().run(body, target, format=format)
+    assert output.is_file()
+    report = (output.parent / 'workflow.json' if format == 'bundle'
+              else output.parent / (output.name + '.assets') / 'workflow.json')
+    cleanup = json.loads(report.read_text())['cleanup']['liver']
+    assert cleanup['smoothing_algorithm'] == 'windowed_sinc'
+    assert cleanup['smoothing_iterations'] == 60 and cleanup['requested_smoothing_pass_band'] == .01
+    with pytest.raises(FileExistsError):
+        PatientWorkflow().run(body, target, format=format)
+
+
+@pytest.mark.parametrize('format', ['usd', 'bundle'])
+@pytest.mark.parametrize('reflected', [False, True])
+def test_agent_precedes_texturing_and_output_is_portable(body, tmp_path, monkeypatch, format, reflected):
+    events = []
+    original = body.anatomy.structures['liver'].mesh.vertices.copy()
+    tile = tmp_path / 'tile.png'
+    tile.write_bytes(b'fixture image')
+    reference = TextureReference(tile, {'surface': 'serosa', 'license': 'CC-BY-4.0'})
+
+    def edit(source, output, options, *, workspace):
+        events.append('agent')
+        assert options.token_budget == 1234
+        output.mkdir()
+        stage = Usd.Stage.Open(str(source))
+        mesh = UsdGeom.Mesh.Get(stage, '/HumanBody/Anatomy/liver')
+        mesh.GetPointsAttr().Set([point + (1, 0, 0) for point in mesh.GetPointsAttr().Get()])
+        if reflected:
+            mesh.GetOrientationAttr().Set('leftHanded')
+            faces = np.asarray(mesh.GetFaceVertexIndicesAttr().Get()).reshape(-1, 3)
+            mesh.GetFaceVertexIndicesAttr().Set(faces[:, ::-1].ravel().tolist())
+        stage.Export(str(output / 'input.usdc'))
+        return output / 'input.usdc'
+
+    def texture(mesh, reference, options, **kwargs):
+        events.append('texture')
+        np.testing.assert_allclose(mesh.vertices, original + [.001, 0, 0], atol=1e-9)
+        material = SurfaceMaterial(str(tile), str(tile))
+        geometry = MeshGeometry(mesh.vertices, mesh.faces, np.zeros((len(mesh.vertices), 2)), None, material)
+        return TextureResult(geometry, np.arange(len(mesh.vertices)), tmp_path, {'surface': 'serosa'})
+
+    monkeypatch.setattr(agent_cli, 'edit_asset', edit)
+    monkeypatch.setattr(workflow, 'texture_mesh', texture)
+    target = tmp_path / ('patient.usdc' if format == 'usd' else 'bundle')
+    output = PatientWorkflow(cleanup=None, agent=AgentOptions('refine', token_budget=1234), textures={'liver': reference},
+                             texture_runtime=TextureRuntime(tmp_path)).run(body, target, format=format)
+    assert events == ['agent', 'texture']
+    np.testing.assert_array_equal(body.anatomy.structures['liver'].mesh.vertices, original)
+    tile.unlink()
+    stage = Usd.Stage.Open(str(output if format == 'usd' else output.parent / 'patient_anatomy.usdc'))
+    assets = [attr.Get() for prim in stage.Traverse() for attr in prim.GetAttributes()
+              if attr.GetTypeName() == Sdf.ValueTypeNames.Asset]
+    assert assets and all(Path(asset.resolvedPath).is_file() for asset in assets)
+    assert all(not Path(asset.path).is_absolute() for asset in assets)
+
+
+def test_texture_failure_does_not_publish_or_mutate(body, tmp_path, monkeypatch):
+    original = body.anatomy.structures['liver'].mesh.vertices.copy()
+    def fail(*args, **kwargs):
+        raise RuntimeError('inference failed')
+    monkeypatch.setattr(workflow, 'texture_mesh', fail)
+    pipeline = PatientWorkflow(cleanup=CleanupOptions(), textures={'liver': TextureReference(tmp_path, {})},
+                               texture_runtime=TextureRuntime(tmp_path))
+    with pytest.raises(RuntimeError, match='inference failed'):
+        pipeline.run(body, tmp_path / 'patient.usdc')
+    assert not (tmp_path / 'patient.usdc').exists()
+    np.testing.assert_array_equal(body.anatomy.structures['liver'].mesh.vertices, original)
 
 
 def test_texture_cache_reuses_completed_inference_and_rejects_changed_triangles(tmp_path, monkeypatch):
@@ -78,7 +157,6 @@ def test_texture_cache_reuses_completed_inference_and_rejects_changed_triangles(
              uv=np.zeros((3, 2)), normals=np.ones((3, 3)))
     with pytest.raises(ValueError, match='source triangles'):
         texturing.texture_mesh(mesh, reference, **arguments)
-
 
 
 def test_reference_completion_validation_and_provenance(body, tmp_path):
@@ -135,6 +213,47 @@ def test_reference_completion_validation_and_provenance(body, tmp_path):
         assert (output.parent / 'refinement' / relative).is_file()
 
 
+def test_inference_cli_accepts_nonagentic_refinement_flags(body, tmp_path, monkeypatch):
+    from patient_digital_twin import __main__ as cli
+    def generate(self, **kwargs):
+        self.ct_scan = body.imaging.scan
+        return body.anatomy
+    monkeypatch.setattr(cli.NVGenerateImporter, 'to_anatomy_collection', generate)
+    result = cli.main(['--source', 'nvgenerate', '--classes', 'liver',
+                       '--output', str(tmp_path / 'patient.usdc'), '--smoothing-iterations', '0',
+                       '--workspace', str(tmp_path / 'work')])
+    assert result == 0
+    report = json.loads((tmp_path / 'patient.usdc.assets/workflow.json').read_text())
+    assert report['agent'] is False and 'liver' in report['cleanup']
+    assert (tmp_path / 'work').is_dir()
+
+
+def test_navigation_is_derived_from_agent_edited_geometry(tmp_path, monkeypatch):
+    import yaml
+    z, y, x = np.indices((35, 25, 25))
+    labels = (((x - 10) ** 2 + (y - 12) ** 2 < 16) & (z > 3) & (z < 31)).astype(np.uint8)
+    patient = HumanBody(SegmentationImporter(labels, {1: 'aorta'},
+                        affine_xyz_to_imaging_m=np.diag([.001, .001, .001, 1])).to_anatomy_collection())
+    patient.attach_scan(from_array(labels.transpose(2, 1, 0), np.eye(4), world_unit='mm'))
+
+    def edit(source, output, options, *, workspace):
+        stage = Usd.Stage.Open(str(source))
+        mesh = UsdGeom.Mesh.Get(stage, '/HumanBody/Anatomy/aorta')
+        assert not mesh.GetPrim().HasAttribute('centerline:points')
+        mesh.GetPointsAttr().Set([point + (3, 0, 0) for point in mesh.GetPointsAttr().Get()])
+        output.mkdir()
+        stage.Export(str(output / 'input.usdc'))
+        return output / 'input.usdc'
+
+    monkeypatch.setattr(agent_cli, 'edit_asset', edit)
+    output = PatientWorkflow(cleanup=None, agent=AgentOptions('shift')).run(
+        patient, tmp_path / 'bundle', format='bundle', vessel_names=['aorta'])
+    manifest = yaml.safe_load(output.read_text())
+    mask = np.load(output.parent / manifest['artifacts']['vessel_mask'])
+    assert abs(np.argwhere(mask)[:, 0].mean() - 13) < .5
+    stage = Usd.Stage.Open(str(output.parent / manifest['artifacts']['anatomy_usd']))
+    assert stage.GetPrimAtPath('/HumanBody/Anatomy/aorta').HasAttribute('centerline:points')
+
 
 def test_texture_palette_matches_reference_without_flattening_detail():
     from patient_digital_twin.texturing._trellis import match_tile_palette
@@ -154,7 +273,6 @@ def test_texture_palette_matches_reference_without_flattening_detail():
     np.testing.assert_array_equal(np.asarray(generated), values)
 
 
-
 def test_default_smoothing_reduces_voxel_steps_without_large_volume_drift():
     z, y, x = np.indices((25, 65, 65))
     labels = (((x - 32) ** 2 + (y - 32) ** 2 + ((z - 12) * 3) ** 2) < 24 ** 2).astype(np.uint8)
@@ -166,6 +284,19 @@ def test_default_smoothing_reduces_voxel_steps_without_large_volume_drift():
     assert abs(after['volume_mm3'] / before['volume_mm3'] - 1) < .02
     assert after['watertight'] and after['euler_characteristic'] == before['euler_characteristic'] == 2
 
+
+def test_cleanup_can_be_explicitly_disabled_with_flags():
+    import argparse
+
+    from patient_digital_twin._refinement_cli import (
+        add_refinement_arguments,
+        pop_refinement_workflow,
+    )
+    parser = argparse.ArgumentParser()
+    add_refinement_arguments(parser)
+    assert pop_refinement_workflow(vars(parser.parse_args([]))) is None
+    assert pop_refinement_workflow(vars(parser.parse_args(['--cleanup']))).cleanup == CleanupOptions()
+    assert pop_refinement_workflow(vars(parser.parse_args(['--no-cleanup']))).cleanup is None
 
 
 def test_colon_shape_gate_rejects_connected_surface_with_handles(tmp_path):
@@ -191,7 +322,6 @@ def test_colon_shape_gate_rejects_connected_surface_with_handles(tmp_path):
             assert report['structures']['colon']['validation']['euler_characteristic'] == 2
 
 
-
 def test_strong_cleanup_does_not_collapse_coarse_mesh():
     import trimesh
     cylinder = trimesh.creation.cylinder(radius=.005, height=.04, sections=16)
@@ -200,7 +330,6 @@ def test_strong_cleanup_does_not_collapse_coarse_mesh():
     assert surface.is_watertight and len(surface.faces)
     assert abs(surface.volume / cylinder.volume - 1) <= .02
     assert result.measurements['smoothing_pass_band'] > .01
-
 
 
 def test_packaged_texture_defaults():
@@ -214,6 +343,32 @@ def test_packaged_texture_defaults():
     with pytest.raises(ValueError, match='No default texture'):
         default_texture_reference('unknown')
 
+
+@pytest.mark.parametrize('mode', ['default', 'override', 'disabled'])
+def test_workflow_resolves_texture_defaults(body, tmp_path, monkeypatch, mode):
+    calls = []
+    override = TextureReference(tmp_path / 'custom.png', {'surface': 'custom'})
+
+    def texture(mesh, reference, options, **kwargs):
+        calls.append(reference)
+        return TextureResult(mesh, np.arange(len(mesh.vertices)), tmp_path,
+                             {'surface': reference.metadata['surface']})
+
+    monkeypatch.setattr(workflow, 'texture_mesh', texture)
+    pipeline = PatientWorkflow(cleanup=None, texture_runtime=TextureRuntime(tmp_path),
+                               default_textures=mode != 'disabled')
+    if mode == 'override':
+        pipeline.textures['liver'] = override
+    output = pipeline.run(body, tmp_path / 'patient.usdc')
+    assert output.is_file()
+    if mode == 'disabled':
+        assert calls == []
+    elif mode == 'override':
+        assert calls == [override]
+    else:
+        assert len(calls) == 1
+        assert calls[0].metadata['organ'] == 'liver'
+        assert pipeline.textures == {}  # Resolved defaults belong to this run.
 
 
 def test_tissue_family_defaults_are_explicit_and_preserve_exact_overrides():
@@ -245,6 +400,130 @@ def test_tissue_family_defaults_are_explicit_and_preserve_exact_overrides():
     assert len(assigned) == len(set(assigned))
 
 
+def test_retain_missing_texture_does_not_hide_checksum_errors(body, tmp_path, monkeypatch):
+    from patient_digital_twin.references import MissingTextureDefault
+    def missing(name):
+        raise MissingTextureDefault(name)
+    monkeypatch.setattr(workflow, 'default_texture_reference', missing)
+    pipeline = PatientWorkflow(cleanup=None,
+                               texture_runtime=TextureRuntime(tmp_path))
+    output = pipeline.run(body, tmp_path / 'retained.usdc')
+    report = json.loads((output.parent / (output.name + '.assets') / 'workflow.json').read_text())
+    assert report['retained_materials_no_default'] == ['liver']
+    assert report['textures'] == {}
+    pipeline.missing_texture = 'error'
+    with pytest.raises(MissingTextureDefault):
+        pipeline.run(body, tmp_path / 'strict.usdc')
+    pipeline.missing_texture = 'retain'
+    def corrupted(name):
+        raise ValueError('Texture checksum mismatch')
+    monkeypatch.setattr(workflow, 'default_texture_reference', corrupted)
+    with pytest.raises(ValueError, match='checksum'):
+        pipeline.run(body, tmp_path / 'corrupted.usdc')
+
+
+def test_pipeline_resume_continues_textures_and_export_without_reediting(body, tmp_path, monkeypatch):
+    from patient_digital_twin._workflow_checkpoint import load_body
+    counts = {'agent': 0, 'texture': 0, 'cleanup': 0}
+    original_cleanup = workflow.prepare_surface
+    def clean(*args):
+        counts['cleanup'] += 1
+        return original_cleanup(*args)
+    def edit(source, output, options, *, workspace):
+        import shutil
+        counts['agent'] += 1
+        output.mkdir()
+        shutil.copy2(source, output / source.name)
+        return output / source.name
+    def texture(mesh, reference, options, **kwargs):
+        counts['texture'] += 1
+        if counts['texture'] == 1:
+            raise RuntimeError('GPU interrupted')
+        return TextureResult(mesh, np.arange(len(mesh.vertices)), tmp_path, {'completed': True})
+    monkeypatch.setattr(workflow, 'prepare_surface', clean)
+    monkeypatch.setattr(agent_cli, 'edit_asset', edit)
+    monkeypatch.setattr(workflow, 'texture_mesh', texture)
+    pipeline = PatientWorkflow(agent=AgentOptions('Edit'), texture_runtime=TextureRuntime(tmp_path),
+                               workspace=tmp_path / 'work')
+    with pytest.raises(RuntimeError, match='GPU interrupted'):
+        pipeline.run(body, tmp_path / 'bundle', format='bundle', patient_id='resume-test')
+    run = next((tmp_path / 'work').glob('run-*'))
+    restored = load_body(run / 'body')
+    np.testing.assert_array_equal(restored.imaging.scan.values, body.imaging.scan.values)
+    np.testing.assert_array_equal(restored.imaging.scan.ijk_to_ras_m, body.imaging.scan.ijk_to_ras_m)
+    output = PatientWorkflow.resume(run)
+    assert output.is_file()
+    assert (output.parent / 'human_body.usdc').is_file()
+    assert (output.parent / 'patient_anatomy.usdc').is_file()
+    report = json.loads((output.parent / 'workflow.json').read_text())
+    assert report['textures']['liver']['completed']
+    assert counts == {'agent': 1, 'texture': 2, 'cleanup': 1}
+    assert PatientWorkflow.resume(run) == output
+    assert counts['texture'] == 2
+
+
+def test_pipeline_resume_after_agent_failure_runs_remaining_pipeline(body, tmp_path, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise RuntimeError('token budget exhausted')
+    def resumed(workspace, output, options):
+        import shutil
+        assert options.token_budget == 200000 and options.blender_mode == 'virtual'
+        output.mkdir()
+        shutil.copy2(workspace.parent / 'input.usdc', output / 'input.usdc')
+        return output / 'input.usdc'
+    monkeypatch.setattr(agent_cli, 'edit_asset', interrupted)
+    monkeypatch.setattr(agent_cli, 'resume_asset', resumed)
+    run_options = PatientWorkflow(cleanup=None, agent=AgentOptions('Edit'), workspace=tmp_path / 'work')
+    with pytest.raises(RuntimeError, match='token budget'):
+        run_options.run(body, tmp_path / 'patient.usdc')
+    run = next((tmp_path / 'work').glob('run-*'))
+    result = PatientWorkflow.resume(run, token_budget=200000, blender_mode='virtual')
+    assert result.is_file()
+    assert json.loads((run / 'pipeline.json').read_text())['stage'] == 'complete'
+
+
+def test_editor_resume_routes_back_to_parent_pipeline(tmp_path, monkeypatch):
+    run = tmp_path / 'run'
+    workspace = run / 'agent'
+    workspace.mkdir(parents=True)
+    (run / 'pipeline.json').write_text('{}')
+    calls = []
+    def resume(path, **options):
+        calls.append((path, options))
+        return tmp_path / 'final/patient_twin.yaml'
+    monkeypatch.setattr(PatientWorkflow, 'resume', resume)
+    assert agent_cli.main(['resume', '--workspace', str(workspace), '--output', str(tmp_path / 'final'),
+                           '--backend', 'codex', '--model', 'gpt-6.1-terra', '--blender-mode', 'virtual',
+                           '--token-budget', '200000', 'Finish the colon']) == 0
+    assert calls[0][0] == run
+    assert calls[0][1]['token_budget'] == 200000
+    assert calls[0][1]['agent_overrides']['prompt'] == 'Finish the colon'
+
+
+def test_checkpoint_preserves_patient_contract(body, tmp_path):
+    from patient_digital_twin._workflow_checkpoint import load_body, save_body
+    from patient_digital_twin.geometry import CenterlineGraph
+    structure = body.anatomy.structures['liver']
+    structure.local_to_world[:3, 3] = [.1, .2, .3]
+    structure.local_to_body[:3, 3] = [.01, .02, .03]
+    structure.enabled = False
+    structure.mesh.uv = np.zeros((len(structure.mesh.vertices), 2))
+    structure.mesh.normals = np.ones_like(structure.mesh.vertices)
+    structure.mesh.material = SurfaceMaterial('base.png', 'rough.png', .4)
+    structure.centerline = CenterlineGraph(points=np.array([[0., 0, 0], [0, 0, .01]]),
+                                         radii=np.array([.001, .002]), edges=np.array([[0, 1]]))
+    save_body(body, tmp_path / 'snapshot')
+    restored = load_body(tmp_path / 'snapshot')
+    other = restored.anatomy.structures['liver']
+    assert other.enabled is False and other.mesh.material == structure.mesh.material
+    for name in ['vertices', 'faces', 'uv', 'normals']:
+        np.testing.assert_array_equal(getattr(other.mesh, name), getattr(structure.mesh, name))
+    np.testing.assert_array_equal(other.local_to_body, structure.local_to_body)
+    np.testing.assert_array_equal(other.local_to_world, structure.local_to_world)
+    np.testing.assert_array_equal(other.centerline.radii, structure.centerline.radii)
+    np.testing.assert_array_equal(restored.imaging.scan.values, body.imaging.scan.values)
+    assert restored.imaging.scan.metadata == body.imaging.scan.metadata
+
 
 def test_vessel_repair_guidance_is_scoped():
     from patient_digital_twin.refinement import vessel_repair_guidance
@@ -257,7 +536,6 @@ def test_vessel_repair_guidance_is_scoped():
         assert 'Do not merge arteries with veins' in prompt
         assert 'explicitly selected' in prompt
         assert ('Expected groups:' in prompt) == (name == 'aorta')
-
 
 
 def test_non_aortic_major_branches_require_explicit_selection(tmp_path):
@@ -282,7 +560,6 @@ def test_non_aortic_major_branches_require_explicit_selection(tmp_path):
         load_references({'inferior_vena_cava': path}, include_major_branches=True)
 
 
-
 def test_vessel_branches_default_and_hra_coverage():
     import csv
 
@@ -301,7 +578,6 @@ def test_vessel_branches_default_and_hra_coverage():
         for suffix in ('_main', '_major_branches'):
             selected = metadata['selections'][name + suffix]
             assert selected and set(selected) <= nodes
-
 
 
 def test_named_prompt_is_saved_and_sent_to_sdk(body, tmp_path, monkeypatch):

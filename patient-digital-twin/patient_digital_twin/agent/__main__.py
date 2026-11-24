@@ -340,6 +340,15 @@ def main(argv: list[str] | None = None) -> int:
         workspace = Path(tempfile.mkdtemp(prefix='.asset-edit-', dir=output.parent))
     else:
         workspace = args.workspace.expanduser().resolve()
+    if command == 'resume' and (workspace.parent / 'pipeline.json').is_file():
+        from ..workflow import PatientWorkflow
+        overrides = {key: value for key, value in dict(backend=args.backend, model=args.model,
+            prompt=args.prompt, timeout_s=args.timeout, max_repairs=args.max_repairs,
+            max_turns=args.max_turns, budget_usd=args.budget_usd).items() if value is not None}
+        print('Resuming parent patient pipeline, including textures and final export…', flush=True)
+        print(PatientWorkflow.resume(workspace.parent, output=output, token_budget=args.token_budget,
+                                    blender_mode=args.blender_mode, agent_overrides=overrides))
+        return 0
     checkpoint, edited = workspace / 'edited.blend', workspace / 'edited.usdc'
     if command != 'edit':
         if not all((workspace / name).is_file() for name in ('edit.json', 'original.usdc')):

@@ -44,6 +44,9 @@ In a new terminal, run `source .venv/bin/activate` once. Then run installed comm
 normally, for example `patient-digital-twin --help` or `python your_script.py`.
 You do not need an `uv` prefix to run them.
 
+Packaged texture tiles use Git LFS. From a source checkout, run `git lfs pull`
+before building or installing texture support.
+
 To add TRELLIS.2 texture generation in the same environment:
 
 ```bash
@@ -249,10 +252,11 @@ uses relative paths, so in-process calls temporarily change it and are serialize
 
 Use new output paths. Bundle patient IDs are derived automatically from the input
 folder (`geometry` for generated anatomy); no `--patient-id` option is needed.
-The CLI extracts missing vessel centerlines automatically.
+The CLI extracts missing centerlines for explicitly selected vessels.
 NV-Segment accepts 3D `.nii`/`.nii.gz`, DICOM CT, or `volume.yaml`;
 `--modality MR` supports geometry-only NIfTI USD.
-Bundle output requires CT and at least one vessel. Run
+CLI bundle output requires CT. Named selections require at least one vessel;
+`--classes all` is exempt and does not request navigation. Run
 `python -m patient_digital_twin --help` for options.
 
 In an installed i4h-workflows checkout:
@@ -347,4 +351,6 @@ Its public API, all importable from `vasculature_digital_twin`:
 - [USD layout and coordinate transforms](docs/usd.md)
 - [Example scripts and viewer](examples/README.md)
 - [Standalone CT and centerline artifacts](examples/README.md#ct-and-centerline-arrays-only)
+- [Refinement and recovery](docs/refinement.md)
+- [Run commands](docs/run-commands.md)
 - [Deprecated `vasculature_digital_twin`](#deprecated-vasculature_digital_twin)
