@@ -167,6 +167,10 @@ def blender_session(workspace: Path, config: dict, mode: str = 'auto'):
     if virtual:
         env.pop('WAYLAND_DISPLAY', None)
         env.pop('WAYLAND_SOCKET', None)
+        # Xvfb has no physical display. Keep its viewport GL context on Mesa;
+        # CUDA workers run separately and still use the GPU. Respect an explicit
+        # override for installations with a tested hardware-backed X server.
+        env.setdefault('LIBGL_ALWAYS_SOFTWARE', '1')
     command = prefix + [executable, '--factory-startup', '--python', str(Path(__file__).resolve()),
                         '--', str(addon), str(workspace / 'blender-ready.json')]
     with _running_blender(command, env, workspace) as port:
@@ -245,7 +249,15 @@ def _start_addon() -> None:
         raise RuntimeError('Blender MCP add-on failed to start')
     ready = Path(ready_path)
     temporary = ready.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'port': server.socket.getsockname()[1], 'pid': os.getpid(), 'display': os.environ.get('DISPLAY')}))
+    import gpu
+    temporary.write_text(json.dumps({
+        'port': server.socket.getsockname()[1], 'pid': os.getpid(),
+        'display': os.environ.get('DISPLAY'), 'blender_version': bpy.app.version_string,
+        'viewport_renderer': gpu.platform.renderer_get(),
+        'viewport_vendor': gpu.platform.vendor_get(),
+        'viewport_version': gpu.platform.version_get(),
+        'software_gl_requested': os.environ.get('LIBGL_ALWAYS_SOFTWARE'),
+    }))
     temporary.replace(ready)
 
 

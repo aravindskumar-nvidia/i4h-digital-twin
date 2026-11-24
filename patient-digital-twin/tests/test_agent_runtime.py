@@ -94,6 +94,8 @@ def test_real_virtual_desktop_and_cleanup_on_failure(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match='agent failure'):
         with runtime.blender_session(tmp_path, config, 'virtual') as connection:
             ready = json.loads((tmp_path / 'blender-ready.json').read_text())
+            assert ready['software_gl_requested'] == os.environ.get('LIBGL_ALWAYS_SOFTWARE', '1')
+            assert ready['viewport_renderer'] and ready['blender_version']
             assert runtime._responding('127.0.0.1', ready['port'])
             with monkeypatch.context() as incompatible:
                 incompatible.setattr(runtime, 'MCP_PROTOCOL', -1)
@@ -111,6 +113,22 @@ def test_real_virtual_desktop_and_cleanup_on_failure(tmp_path, monkeypatch):
                         assert set(BLENDER_TOOLS) <= {t.name for t in (await client.list_tools()).tools}
                         result = await client.call_tool('look', {'mode': 'viewport', 'shading': 'solid', 'max_size': 256})
                         assert not result.isError and any(c.type == 'image' for c in result.content)
+                        # Reference inspection changes scenes between offscreen
+                        # captures. Exercise the path that failed in the live run.
+                        for name in ('reference', 'patient', 'reference'):
+                            code = ("import bpy\n"
+                                    f"scene=bpy.data.scenes.get({name!r}) or bpy.data.scenes.new({name!r})\n"
+                                    "scene.render.engine='BLENDER_WORKBENCH'\n"
+                                    "bpy.context.window.scene=scene\n"
+                                    "if not scene.objects: bpy.ops.mesh.primitive_uv_sphere_add()\n"
+                                    "bpy.context.view_layer.update()")
+                            result = await client.call_tool('execute_blender_code', {
+                                'code': code, 'user_prompt': 'Verify reference scene capture stability'})
+                            assert not result.isError
+                            result = await client.call_tool('look', {
+                                'mode': 'angles', 'views': ['front', 'right'],
+                                'shading': 'solid', 'max_size': 512})
+                            assert not result.isError and any(c.type == 'image' for c in result.content)
 
             asyncio.run(screenshot())
             raise RuntimeError('agent failure')

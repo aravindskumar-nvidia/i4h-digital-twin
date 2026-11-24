@@ -28,6 +28,9 @@ def open_asset(directory):
     folder = Path(directory)
     settings = json.loads((folder / 'edit.json').read_text())
     scene = bpy.data.scenes.new('I4H ' + settings['token'])
+    # Use the same lightweight engine in patient and reference scenes. Offscreen
+    # inspection should not switch between Eevee and Workbench render contexts.
+    scene.render.engine = 'BLENDER_WORKBENCH'
     bpy.context.window.scene = scene
     scene.unit_settings.system = 'METRIC'
     scene.unit_settings.scale_length = 1.0
