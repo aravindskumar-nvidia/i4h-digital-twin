@@ -3,7 +3,14 @@
 
 """Public API for patient digital twins."""
 
-from .anatomy import AnatomicalStructure, AnatomyCollection, Kind, MeshGeometry, System
+from .anatomy import (
+    AnatomicalStructure,
+    AnatomyCollection,
+    Kind,
+    MeshGeometry,
+    SurfaceMaterial,
+    System,
+)
 from .body import HumanBody, ImagingVolume
 from .geometry import CenterlineGraph
 from .importers import (
@@ -13,9 +20,13 @@ from .importers import (
     SimpleImporter,
 )
 from .references import TextureReference
+from .surface import CleanupOptions, CleanupResult, prepare_surface
+from .texturing import TextureOptions, TextureResult, TextureRuntime, texture_mesh
 
 __all__ = [
     "AnatomicalStructure", "AnatomyCollection", "CenterlineGraph", "HumanBody", "ImagingVolume",
     "Kind", "MeshGeometry", "NVGenerateImporter", "NVSegmentImporter", "SegmentationImporter",
-    "SimpleImporter", "System", "TextureReference",
+    "SimpleImporter", "System", "SurfaceMaterial",
+    "CleanupOptions", "CleanupResult", "prepare_surface", "TextureOptions", "TextureRuntime",
+    "TextureResult", "texture_mesh", "TextureReference",
 ]

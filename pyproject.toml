@@ -62,6 +62,7 @@ packages = [
   "hospital_digital_twin",
   "patient_digital_twin",
   "patient_digital_twin.agent",
+  "patient_digital_twin.texturing",
   "robot_digital_twin",
   "sim_ready_assets",
   "vasculature_digital_twin",  # Deprecated.

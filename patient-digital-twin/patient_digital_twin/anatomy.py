@@ -151,11 +151,23 @@ def canonical_name(raw: str) -> str:
 
 
 @dataclass
+class SurfaceMaterial:
+    """Opaque tissue PBR maps; color is sRGB, roughness is linear grayscale."""
+
+    base_color: str
+    roughness_map: str
+    roughness: float = 0.35
+
+
+@dataclass
 class MeshGeometry:
     """Stored local XYZ-meter vertices (N, 3) and triangle indices (F, 3), kept while disabled."""
 
     vertices: np.ndarray | None = field(default=None, repr=False)
     faces: np.ndarray | None = field(default=None, repr=False)
+    uv: np.ndarray | None = field(default=None, repr=False)
+    normals: np.ndarray | None = field(default=None, repr=False)
+    material: SurfaceMaterial | None = None
 
 
 class AnatomicalStructure:
@@ -210,6 +222,7 @@ class AnatomicalStructure:
     @vertices.setter
     def vertices(self, value: np.ndarray | None) -> None:
         self.mesh.vertices, self.centerline = value, None
+        self.mesh.uv = self.mesh.normals = self.mesh.material = None
 
     @property
     def faces(self) -> np.ndarray | None:
@@ -219,6 +232,7 @@ class AnatomicalStructure:
     @faces.setter
     def faces(self, value: np.ndarray | None) -> None:
         self.mesh.faces, self.centerline = value, None
+        self.mesh.uv = self.mesh.normals = self.mesh.material = None
 
     @property
     def body_vertices(self) -> np.ndarray | None:
