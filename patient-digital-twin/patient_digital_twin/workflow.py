@@ -9,13 +9,13 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
 
 from .agent import AgentOptions
-from .anatomy import MeshGeometry
+from .anatomy import Kind, MeshGeometry, canonical_name
 from .body import HumanBody
 from .references import (
     MissingTextureDefault,
@@ -23,13 +23,19 @@ from .references import (
     default_texture_reference,
 )
 from .surface import CleanupOptions, prepare_surface
-from .texturing import TextureOptions, TextureRuntime, texture_mesh
+from .texturing import TextureOptions, TextureRuntime, check_runtime, texture_mesh
+
+# Catalog labels that are several separate bodies by definition, like grouped kinds.
+_MULTIBODY_LABELS = frozenset({'pulmonary_vein'})
 
 
 class PatientWorkflow:
     """Own a run's options and artifacts. Cleanup is on; agent editing is opt-in.
 
     Pass cleanup=None to retain the input surface without deterministic cleanup.
+    Cleanup's distance filter is not applied to labels that are several bodies by
+    definition (grouped and finding kinds, pulmonary_vein), and structures that
+    already carry a material are left as supplied.
     A configured texture runtime enables packaged organ defaults; explicit textures
     override them. Set default_textures=False to use only explicit textures.
 
@@ -91,7 +97,9 @@ class PatientWorkflow:
                         retained_materials.append(name)
         selected = set(textures) | set(vessel_names)
         if self.agent:
+            # A mistyped target must fail here, before cleanup and checkpointing.
             selected.update(self.agent.anatomy_references)
+            selected.update(self.agent.targets)
         if missing := [name for name in selected if name not in body.anatomy.structures
                        or body.anatomy.structures[name].is_empty]:
             raise ValueError(f'Requested structures have no enabled mesh: {missing}')
@@ -119,9 +127,32 @@ class PatientWorkflow:
             for name, structure in body.anatomy.structures.items():
                 if structure.is_empty:
                     continue
-                result = prepare_surface(structure.mesh, self.cleanup)
+                if structure.mesh.material is not None:
+                    # Cleanup would invalidate existing UVs; keep textured input as supplied.
+                    print(f'Cleanup skipped for textured structure: {name}', flush=True)
+                    report['cleanup'][name] = {'skipped': 'already_textured'}
+                    continue
+                options = self.cleanup
+                multibody = (structure.kind in {Kind.GROUP, Kind.FINDING}
+                             or canonical_name(name) in _MULTIBODY_LABELS)
+                if multibody:
+                    # Separate bodies are expected here; distance says nothing about validity.
+                    options = replace(options, max_component_distance_mm=0)
+                try:
+                    result = prepare_surface(structure.mesh, options)
+                except ValueError as error:
+                    raise ValueError(f'Cleanup failed for {name}: {error}') from error
                 structure.mesh, structure.centerline = result.mesh, None
                 report['cleanup'][name] = result.measurements
+                if multibody and self.cleanup.max_component_distance_mm:
+                    result.measurements['distance_filter'] = 'disabled_for_multibody_label'
+                distant = [record for record in result.measurements['component_filter']['components']
+                           if record['decision'] == 'remove_distant']
+                if distant:
+                    print(f'Warning: cleanup removed {len(distant)} distant component(s) of {name} '
+                          f'({sum(record["area_mm2"] for record in distant):.0f} mm2, more than '
+                          f'{options.max_component_distance_mm:g} mm from the retained surface). '
+                          'Set max_component_distance_mm=0 to keep them.', flush=True)
         if state is None:
             save_body(body, run / 'body')
             if original_graphs:
@@ -158,14 +189,15 @@ class PatientWorkflow:
                 edited = edit_asset(source, run / 'edited', self.agent, workspace=run / 'agent')
             state.update(edited=str(edited), stage='textures')
             write_state(state_path, state)
-        if edited:
-            _read_edited_geometry(body, edited)
+        edited_stage = _read_edited_geometry(body, edited) if edited else None
+        identity = check_runtime(self.texture_runtime) if textures and self.texture_runtime else None
         for index, (name, reference) in enumerate(textures.items(), 1):
             print(f'Texturing {index}/{len(textures)}: {name}', flush=True)
             assert self.texture_runtime is not None
             structure = body.anatomy.structures[name]
             textured = texture_mesh(structure.mesh, reference, self.texture_options,
-                                    runtime=self.texture_runtime, workspace=root / 'textures')
+                                    runtime=self.texture_runtime, workspace=root / 'textures',
+                                    identity=identity)
             structure.mesh = textured.mesh
             report['textures'][name] = textured.metadata
             write_state(state_path, state)
@@ -188,9 +220,9 @@ class PatientWorkflow:
             anatomy = body.export_to_usd(package / output.name)
             result_name = output.name
         if edited:
-            _restore_appearance(anatomy, edited, set(textures))
+            _restore_appearance(anatomy, edited, set(textures), edited_stage)
             if format == 'bundle':
-                _restore_appearance(companion, edited, set(textures))
+                _restore_appearance(companion, edited, set(textures), edited_stage)
             provenance = edited.parent / 'refinement'
             if provenance.exists():
                 shutil.copytree(provenance, package / 'refinement')
@@ -223,6 +255,9 @@ class PatientWorkflow:
         continuation = overrides.pop('prompt', None)
         options = state['agent']
         if options:
+            if overrides.get('backend', options['backend']) != options['backend']:
+                # Saved limits belong to the previous backend and are invalid for the new one.
+                options.update(max_turns=None, budget_usd=None, token_budget=None)
             options.update(overrides)
             options['anatomy_references'] = {name: Path(path) for name, path in options['anatomy_references'].items()}
             if token_budget is not None:
@@ -272,20 +307,49 @@ def _annotate_cleanup(path, cleanup):
 
 def _restore_topology(body, original_graphs, requested, spacing_mm):
     """Restore invalidated graphs and compute explicitly requested new ones."""
-    from .geometry import centerline_spacing
-
     for name in sorted(set(original_graphs) | set(requested)):
-        if body.anatomy.structures[name].centerline is not None:
+        structure = body.anatomy.structures[name]
+        if structure.centerline is not None:
             continue
         spacing = spacing_mm * .001
         if name in original_graphs:
-            graph = original_graphs[name]
-            spacing = centerline_spacing(graph.points, graph.edges)
-        body.extract_topology(names=[name], spacing_m=spacing)
+            spacing = _grid_spacing(original_graphs[name]) or spacing
+        if name not in original_graphs:
+            body.extract_topology(names=[name], spacing_m=spacing)
+            continue
+        try:
+            regenerated = body.extract_topology(names=[name], spacing_m=spacing)
+        except RuntimeError as error:
+            regenerated, reason = {}, f'regeneration failed ({error})'
+        else:
+            reason = 'it cannot be regenerated for this structure kind'
+        if not regenerated:
+            # Only vessels and airways can be regenerated; never drop a supplied graph.
+            print(f'Warning: retained the supplied centerline of {name}: {reason}. '
+                  'It may not match the processed surface.', flush=True)
+            structure.centerline = original_graphs[name]
 
 
-def _read_edited_geometry(body: HumanBody, edited: Path) -> None:
-    """Read local geometry from the validated handoff, retaining patient transforms."""
+def _grid_spacing(graph) -> float | None:
+    """Spacing of a pipeline grid skeleton, or None for single-node or resampled graphs."""
+    from .geometry import centerline_spacing
+
+    try:
+        spacing = centerline_spacing(graph.points, graph.edges)
+        points, edges = np.asarray(graph.points, dtype=float), np.asarray(graph.edges)
+        steps = (points[edges[:, 1]] - points[edges[:, 0]]) / spacing
+    except (ValueError, IndexError):
+        return None
+    on_grid = np.allclose(steps, np.round(steps), rtol=0, atol=.05) and np.abs(steps).max() < 1.05
+    return spacing if on_grid else None
+
+
+def _read_edited_geometry(body: HumanBody, edited: Path):
+    """Read local geometry from the validated handoff, retaining patient transforms.
+
+    Winding is normalized in memory only: the published or user-supplied file is
+    never rewritten. Returns the normalized stage for the appearance transfer.
+    """
     from pxr import Usd, UsdGeom
 
     from .geometry import CenterlineGraph, validate_triangles
@@ -317,7 +381,7 @@ def _read_edited_geometry(body: HumanBody, edited: Path) -> None:
                     edges=np.asarray(prim.GetAttribute('centerline:edges').Get(), dtype=np.int64),
                     radii=np.asarray(prim.GetAttribute('centerline:radii').Get(), dtype=float) * units,
                 )
-    stage.GetRootLayer().Save()
+    return stage
 
 
 def _normalize_winding(mesh) -> None:
@@ -340,13 +404,17 @@ def _normalize_winding(mesh) -> None:
     mesh.GetOrientationAttr().Set(UsdGeom.Tokens.rightHanded)
 
 
-def _restore_appearance(target: Path, edited: Path, textured: set[str]) -> None:
-    """Carry agent materials and UVs onto final geometry unless explicitly retextured."""
+def _restore_appearance(target: Path, edited: Path, textured: set[str], source=None) -> None:
+    """Carry agent materials and UVs onto final geometry unless explicitly retextured.
+
+    Pass the stage returned by _read_edited_geometry as source so per-corner data
+    matches the normalized winding.
+    """
     from pxr import Sdf, Usd, UsdGeom
 
     from .agent.assets import _copy_textures, _merge_materials
 
-    stage, source = Usd.Stage.Open(str(target)), Usd.Stage.Open(str(edited))
+    stage, source = Usd.Stage.Open(str(target)), source or Usd.Stage.Open(str(edited))
     meshes = [prim for prim in source.Traverse() if prim.IsA(UsdGeom.Mesh)
               and prim.GetCustomDataByKey('anatomy:name') not in textured
               and stage.GetPrimAtPath(prim.GetPath())]

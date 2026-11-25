@@ -1,6 +1,0 @@
-Human Reference Atlas / HuBMAP CCF 3D Reference Object Library, based on the National Library of Medicine Visible Human data. Library credits and supplied citations are preserved in provenance/hra-library.yaml.
-Source: https://purl.humanatlas.io/ref-organ/blood-vasculature-female/v1.3
-License: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
-Changes: Original GLB bytes preserved; renamed to reference.glb. Original ontology crosswalk copied as structures.csv. No geometry edits. Crosswalk line endings normalized to LF.
-Library contributors credited by the source: Kristen Browne, Leonard E. Cross, Bruce W. Herr II, Elizabeth G. Record, Ellen M. Quardokus, Andreas Bueckle, Katy Börner, Heidi Schlehlein.
-Full supplied citations: ../../provenance/hra-library.yaml

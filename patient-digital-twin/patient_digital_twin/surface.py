@@ -70,10 +70,7 @@ def _filter_components(source, options):
     else:
         # Expand from the main surface through nearby fragments. Tiny removed islands
         # cannot act as stepping stones to retain otherwise distant false positives.
-        for parent in retained:
-            if not pending:
-                break
-            part = parts[parent]
+        def surface_distance(part):
             points, cells, surface = vtk.vtkPoints(), vtk.vtkCellArray(), vtk.vtkPolyData()
             points.SetData(numpy_to_vtk(np.asarray(part.vertices), deep=True))
             cells.SetData(
@@ -84,21 +81,36 @@ def _filter_components(source, options):
             surface.SetPolys(cells)
             distance = vtk.vtkImplicitPolyDataDistance()
             distance.SetInput(surface)
+            return distance
+
+        def gap_mm(distance, part):
+            values = vtk.vtkDoubleArray()
+            values.SetNumberOfTuples(len(part.vertices))
+            distance.FunctionValue(numpy_to_vtk(np.asarray(part.vertices), deep=True), values)
+            return float(np.min(np.abs(vtk_to_numpy(values))) * 1000)
+
+        limit = options.max_component_distance_mm
+        for parent in retained:
+            if not pending:
+                break
+            distance = surface_distance(parts[parent])
             for i in pending[:]:
-                values = vtk.vtkDoubleArray()
-                values.SetNumberOfTuples(len(parts[i].vertices))
-                distance.FunctionValue(numpy_to_vtk(np.asarray(parts[i].vertices), deep=True), values)
-                gap = float(np.min(np.abs(vtk_to_numpy(values))) * 1000)
+                gap = gap_mm(distance, parts[i])
+                # Sampling only the fragment's vertices overestimates the gap by up to one
+                # fragment edge. Near the limit, also measure from the retained surface so a
+                # coarse fragment is not removed on that error.
+                if limit < gap <= limit + float(parts[i].edges_unique_length.max() * 1000):
+                    gap = min(gap, gap_mm(surface_distance(parts[i]), parts[parent]))
                 previous = records[i]['gap_mm']
                 if previous is None or gap < previous:
                     records[i].update(gap_mm=gap, nearest_component=parent)
-                if gap <= options.max_component_distance_mm:
+                if gap <= limit:
                     records[i]['decision'] = 'retain_nearby'
                     retained.append(i)
                     pending.remove(i)
     return [parts[i] for i in retained], dict(
         coordinate_frame='original_structure_local_mm',
-        distance_method='minimum_fragment_vertex_to_retained_surface',
+        distance_method='minimum_vertex_to_surface_checked_in_both_directions_near_the_limit',
         components=records, retained_component_ids=retained,
     )
 
@@ -123,7 +135,8 @@ def prepare_surface(mesh: MeshGeometry, options: CleanupOptions | None = None) -
 
     Keeps the largest component, removes tiny and distant secondary components,
     and retains nearby fragments separately for agent review. Zero disables each
-    component threshold. VTK's hole radius bounds a boundary loop; it is not a gap-
+    component threshold. Distance assumes one anatomical body: disable it for
+    structures that are several separate bodies by definition. VTK's hole radius bounds a boundary loop; it is not a gap-
     bridging distance. No spline or connection between components is inferred.
     Windowed-sinc smoothing suppresses voxel stepping with limited volume drift.
     Lower pass bands remove more fine-scale variation. Returns before/after

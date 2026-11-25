@@ -41,6 +41,10 @@ def test_agent_texture_and_cleanup_settings(tmp_path, monkeypatch):
     assert run.agent.model == 'gpt-6.1-terra'
     assert run.agent.timeout_s == 900 and run.agent.token_budget == 100000
     assert run.agent.anatomy_references == {'colon': tmp_path / 'reference.json'}
+    # Catalog IDs are kept as written; only file paths are made absolute.
+    by_id = parse(['--agent-prompt', 'Complete only the colon',
+                 '--anatomy-reference', 'colon=voxel-man-colon-male-15882019'])
+    assert by_id.agent.anatomy_references == {'colon': 'voxel-man-colon-male-15882019'}
     assert run.texture_runtime.timeout_s == 900
     assert run.texture_options.texture_size == 1024 and run.texture_options.steps == 8
     assert run.texture_options.match_reference_color is False

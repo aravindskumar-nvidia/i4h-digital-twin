@@ -174,7 +174,7 @@ patient-digital-twin-agent \
   --blender-mode virtual \
   --agent-task repair \
   --agent-target colon \
-  --anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json
+  --anatomy-reference colon=voxel-man-colon-male-15882019
 ```
 
 ```bash
@@ -196,7 +196,7 @@ patient-digital-twin \
   --cleanup \
   --agent-task complete \
   --agent-target colon \
-  --anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json \
+  --anatomy-reference colon=voxel-man-colon-male-15882019 \
   --token-budget 300000 --agent-timeout 1800 \
   --blender-mode virtual \
   --output output/s1384-review/complete
@@ -249,7 +249,7 @@ patient-digital-twin-agent \
   --agent-task complete \
   --agent-target aorta \
   --major-branching \
-  --anatomy-reference aorta=patient-digital-twin/assets/anatomy/hra/blood-vasculature-female-v1.3/metadata.json
+  --anatomy-reference aorta=hra-blood-vasculature-female-v1.3
 ```
 
 ```bash

@@ -52,7 +52,8 @@ def add_refinement_arguments(parser: argparse.ArgumentParser) -> None:
     agent.add_argument('--max-turns', type=int, help='Claude turn limit (default: 30)')
     agent.add_argument('--max-repairs', type=int)
     agent.add_argument('--blender-mode', choices=['auto', 'virtual', 'existing'])
-    agent.add_argument('--anatomy-reference', action='append', metavar='ORGAN=METADATA_JSON')
+    agent.add_argument('--anatomy-reference', action='append', metavar='ORGAN=REFERENCE',
+                       help='Catalog ID, CATALOG.json#ID, or a reference metadata JSON path')
     agent.add_argument('--major-branching', dest='include_major_branches', action='store_true', default=False,
                        help='Include reference-covered major vessel branches (off by default)')
     agent.add_argument('--fragment-area-mm2', type=float)
@@ -89,8 +90,12 @@ def pop_refinement_workflow(options: dict) -> PatientWorkflow | None:
     if (agent_values or values['anatomy_reference']) and not (values['agent_prompt'] or values['agent_task']):
         raise ValueError('Agent options require --agent-task or --agent-prompt')
     if values['anatomy_reference']:
+        from .references import default_catalog, load_catalog
+        catalog = default_catalog()
+        known = load_catalog(catalog)['references'] if catalog.is_file() else {}
+        # Catalog IDs stay as written; files are made absolute for later resume.
         agent_values['anatomy_references'] = {
-            name: Path(path).expanduser().resolve()
+            name: path if path in known else Path(path).expanduser().resolve()
             for name, path in parse_references(values['anatomy_reference']).items()
         }
     if values['agent_task'] == 'texture' and (values['cleanup'] is True or

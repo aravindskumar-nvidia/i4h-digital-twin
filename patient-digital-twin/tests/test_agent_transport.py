@@ -105,13 +105,33 @@ def test_claude_receives_blender_tools(monkeypatch, tmp_path):
     assert publish.call_count == len(captured) == 2
     assert captured[1]['options'].resume == 'test'
     assert captured[1]['options'].max_turns == 2
-    assert captured[1]['options'].max_budget_usd == pytest.approx(.9)
+    # Reported cost is cumulative for the resumed session, so the cap stays the full budget.
+    assert captured[1]['options'].max_budget_usd == 1.
     assert 'Invalid mesh' in captured[1]['prompt']
     options = captured[0]['options']
     assert options.tools == []
     assert 'mcp__blender__execute_blender_code' in options.allowed_tools
     assert options.mcp_servers['blender']['command'] == sys.executable
     assert options.max_turns == 3 and options.max_budget_usd == 1.
+
+
+def test_claude_budget_is_cumulative_across_repairs(monkeypatch, tmp_path):
+    sdk = pytest.importorskip('claude_agent_sdk')
+    from patient_digital_twin.agent.__main__ import run_claude
+    captured, costs = [], iter([.6, 1.2])
+    publish = Mock(side_effect=AssetValidationError('Invalid mesh'))
+
+    async def query(**kwargs):
+        captured.append(kwargs['options'])
+        yield sdk.ResultMessage(subtype='success', duration_ms=1, duration_api_ms=1,
+                                is_error=False, num_turns=1, session_id='test', total_cost_usd=next(costs))
+
+    monkeypatch.setattr(sdk, 'query', query)
+    with pytest.raises(RuntimeError, match='limits exhausted'):
+        run_claude('inspect anatomy', tmp_path, {'command': sys.executable, 'args': []}, None, 9, 1.,
+                   publish=publish, max_repairs=5)
+    # The session total reached the budget after the first repair; no third attempt starts.
+    assert [options.max_budget_usd for options in captured] == [1., 1.]
 
 
 def test_blender_validation_error_survives_mcp_cleanup(tmp_path, monkeypatch):

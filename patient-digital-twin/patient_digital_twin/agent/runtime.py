@@ -83,7 +83,8 @@ def ensure_blender(*, install: bool = False) -> str:
                 stream.write(chunk)
         if digest.hexdigest() != BLENDER_SHA256:
             raise ValueError('Blender SHA-256 verification failed')
-        unpacked = Path(temp) / 'unpacked'
+        # Resolve first: member targets are resolved, and the cache may sit behind a symlink.
+        unpacked = Path(temp).resolve() / 'unpacked'
         unpacked.mkdir()
         with tarfile.open(archive) as package:
             # Python 3.10 also needs traversal/link checks when data_filter is unavailable.

@@ -113,8 +113,12 @@ def _download(source: dict, cache: Path, suffix: str) -> Path:
     raise AssertionError('Unreachable download state')
 
 
-def materialize(metadata: dict, directory: Path, cache: Path | None = None) -> tuple[Path, dict]:
+def materialize(metadata: dict, directory: Path, cache: Path | None = None, *,
+                labels: dict | None = None) -> tuple[Path, dict]:
     """Resolve a recipe into a checksum-verified model and effective metadata.
+
+    Catalog entries pass their label selection as labels; standalone metadata
+    reads it from the structures file in directory.
 
     Local schema-1 assets remain supported by the caller. Recipe sources and
     generated GLBs live outside the repository. A completed manifest is published
@@ -131,7 +135,8 @@ def materialize(metadata: dict, directory: Path, cache: Path | None = None) -> t
         return model, metadata
     if kind != 'voxel-man-labels':
         raise ValueError(f'Unsupported reference preparation: {kind}')
-    labels = json.loads((directory / metadata['structures']).read_text())
+    if labels is None:
+        labels = json.loads((directory / metadata['structures']).read_text())
     # Transport alternatives do not change extraction or invalidate prepared assets.
     identity = dict(recipe={key: value for key, value in recipe.items()
                             if key not in {'alternate_urls', 'size_bytes'}},

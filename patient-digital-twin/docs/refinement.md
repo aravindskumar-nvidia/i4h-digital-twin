@@ -27,6 +27,15 @@ filter. Decisions are recorded in `workflow.json` and the USD's
 `/HumanBody.cleanup:components` attribute, which follows the asset into later
 agent sessions. Plain exports without cleanup retain their previous behavior.
 
+The distance filter assumes one anatomical body. It is not applied to labels that
+are several separate bodies by definition: grouped labels (for example
+`costal_cartilages`, `intervertebral_discs`, `vertebrae`), findings such as
+`kidney_cyst_left`, and `pulmonary_vein`. Their small-fragment filter still applies.
+For every other structure, each distant removal prints a warning with the removed
+area. A structure that already has a material is left as supplied, because cleanup
+would invalidate its texture coordinates. Supplied centerlines are regenerated for
+vessels and airways and otherwise kept unchanged, with a warning.
+
 ## Named agent operations
 
 Use `--agent-task` for routine edits. No verbal prompt is required.
@@ -42,7 +51,7 @@ For example, add these flags to a generation command:
 
 ```bash
 --agent-task complete \
---anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json
+--anatomy-reference colon=voxel-man-colon-male-15882019
 ```
 
 Targets default to the reference keys. Otherwise use `--agent-target liver` (or
@@ -92,7 +101,7 @@ workflow = PatientWorkflow(
         backend="codex",
         token_budget=100_000,
         anatomy_references={
-            "colon": Path("assets/anatomy/voxel-man/colon-male-15882019/metadata.json"),
+            "colon": "voxel-man-colon-male-15882019",
         },
     ),
     workspace="refinement-work",
@@ -220,7 +229,7 @@ python -m patient_digital_twin \
   --agent-prompt "Complete only the colon. Correct course and caliber before haustra." \
   --agent-model gpt-6.1-terra --blender-mode virtual \
   --agent-timeout 900 --token-budget 100000 \
-  --anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json \
+  --anatomy-reference colon=voxel-man-colon-male-15882019 \
   --default-textures \
   --texture-timeout 900 \
   --format bundle --output output/new-patient
@@ -232,7 +241,9 @@ python -m patient_digital_twin \
 - `--agent-prompt`: enable SDK editing. `--agent-model`, `--agent-backend`,
   `--agent-timeout`, `--token-budget`, `--budget-usd`, `--max-turns`, and
   `--max-repairs` control the session. Backend-specific budgets are validated.
-- Repeat `--anatomy-reference ORGAN=METADATA_JSON` for shape references.
+- Repeat `--anatomy-reference ORGAN=REFERENCE` for shape references. `REFERENCE` is an ID from
+  `assets/anatomy/catalog.json`, `CATALOG.json#ID` for another catalog, or the path of a
+  standalone reference `metadata.json`. Earlier `assets/anatomy/.../metadata.json` paths still resolve.
 - `--default-textures`: enable GPU texturing with TRELLIS.2 installed in the active environment.
 - Repeat `--texture ORGAN=METADATA_JSON` for tile overrides. These JSON files
   describe reference assets; they do not configure the workflow.
@@ -316,10 +327,10 @@ Whole-patient CLI runs (`--classes all`) export anatomy and CT without vessel
 navigation. Explicit vessel selections, such as `--classes aorta`, request navigation
 for those vessels. The Python API keeps `vessel_names` explicit.
 
-The HRA reference at `assets/anatomy/hra/blood-vasculature-female-v1.3/metadata.json`
+The HRA reference `hra-blood-vasculature-female-v1.3`
 has explicit main/branch selections for aorta, inferior vena cava (tributaries),
 pulmonary artery, celiac trunk and superior/inferior mesenteric arteries. Supply it
-as `--anatomy-reference TARGET=PATH`. This is partial named coverage, not a complete
+as `--anatomy-reference TARGET=hra-blood-vasculature-female-v1.3`. This is partial named coverage, not a complete
 vascular tree. Missing branches and source limitations must be recorded in the
 agent report. Other vessels require a verified reference with explicit branch
 selections; no unrelated asset is substituted. The agent must inspect the GLB and

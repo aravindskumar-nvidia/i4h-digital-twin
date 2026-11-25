@@ -31,8 +31,8 @@ patient-digital-twin \
   --agent-model gpt-6-astra \
   --token-budget 300000 \
   --blender-mode virtual \
-  --anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json \
-  --anatomy-reference aorta=patient-digital-twin/assets/anatomy/hra/blood-vasculature-female-v1.3/metadata.json \
+  --anatomy-reference colon=voxel-man-colon-male-15882019 \
+  --anatomy-reference aorta=hra-blood-vasculature-female-v1.3 \
   --default-textures \
   --format bundle \
   --output "output/s0878-four-organs-$(date +%Y%m%d-%H%M%S)"
@@ -51,7 +51,7 @@ patient-digital-twin \
   --agent-model gpt-6-astra \
   --token-budget 300000 \
   --blender-mode virtual \
-  --anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json \
+  --anatomy-reference colon=voxel-man-colon-male-15882019 \
   --default-textures \
   --format bundle \
   --output "output/s0878-whole-patient-$(date +%Y%m%d-%H%M%S)"
@@ -83,7 +83,7 @@ patient-digital-twin \
   --agent-model gpt-6-astra \
   --token-budget 300000 \
   --blender-mode virtual \
-  --anatomy-reference aorta=patient-digital-twin/assets/anatomy/hra/blood-vasculature-female-v1.3/metadata.json \
+  --anatomy-reference aorta=hra-blood-vasculature-female-v1.3 \
   --default-textures \
   --format bundle \
   --output "output/s0878-aorta-$(date +%Y%m%d-%H%M%S)"
@@ -100,7 +100,7 @@ patient-digital-twin-agent \
   --token-budget 300000 \
   --blender-mode virtual \
   --agent-task repair \
-  --anatomy-reference colon=patient-digital-twin/assets/anatomy/voxel-man/colon-male-15882019/metadata.json
+  --anatomy-reference colon=voxel-man-colon-male-15882019
 ```
 
 Standalone editing: no segmentation or new texture generation. Replace `repair` with `complete` to fill missing anatomy.

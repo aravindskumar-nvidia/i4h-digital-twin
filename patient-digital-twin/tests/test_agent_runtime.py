@@ -23,7 +23,10 @@ def test_installer_checks_hash_and_reuses_cached_binary(tmp_path, monkeypatch, v
         package.addfile(info, io.BytesIO(data))
     payload = archive.getvalue()
     monkeypatch.delenv('BLENDER_EXECUTABLE', raising=False)
-    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path))
+    # A symlinked cache (for example an NFS home) must not trip the archive path check.
+    (tmp_path / 'real').mkdir()
+    (tmp_path / 'cache').symlink_to(tmp_path / 'real')
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'cache'))
     monkeypatch.setattr(runtime.shutil, 'which', lambda _: None)
     monkeypatch.setattr(runtime.platform, 'system', lambda: 'Linux')
     monkeypatch.setattr(runtime.platform, 'machine', lambda: 'x86_64')

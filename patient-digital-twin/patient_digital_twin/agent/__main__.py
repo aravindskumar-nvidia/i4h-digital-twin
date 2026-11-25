@@ -32,6 +32,10 @@ Each execute_blender_code call has a fresh namespace: import dependencies and
 resolve scenes/objects within that call, or save reusable functions in a workspace
 module. Keep inspection images at max_size=768 or smaller unless detail requires
 more. Save required reference/result comparison images in the workspace.
+Batch related scene queries and geometry measurements in one Python call. Once
+the target, placement and necessary reference evidence are understood, make the
+first supported local edit. Further inspection should answer a concrete question
+or verify a change. Reuse unchanged views; avoid repeated planning and scene dumps.
 Keep the existing mesh objects and their mesh-data i4h_path properties: adding,
 deleting, splitting or joining objects is unsupported. Geometry edits, modifiers,
 UVs and USD Preview Surface compatible materials/textures are supported. Use
@@ -123,19 +127,21 @@ def run_claude(prompt: str, workspace: Path, config: dict, model: str | None,
             raise RuntimeError("Claude session ended without a result")
         return result
 
-    remaining_turns, remaining_budget = max_turns, budget_usd
+    remaining_turns, spent = max_turns, 0.
     deadline = monotonic() + timeout_s
     for prompt in _edit_attempts(prompt, publish, max_repairs):
         remaining = deadline - monotonic()
         if remaining <= 0:
             raise TimeoutError('Agent editing timed out')
-        if remaining_turns <= 0 or remaining_budget <= 0:
+        if remaining_turns <= 0 or spent >= budget_usd:
             raise RuntimeError('Claude session limits exhausted; saved edits retained')
         result = asyncio.run(asyncio.wait_for(turn(), remaining))
         remaining_turns -= result.num_turns
-        remaining_budget = budget_usd - (result.total_cost_usd if result.total_cost_usd is not None else budget_usd)
-        options = replace(options, resume=result.session_id,
-                          max_turns=remaining_turns, max_budget_usd=remaining_budget)
+        # num_turns counts this invocation only, but total_cost_usd is cumulative for a
+        # resumed session and is what the SDK compares with max_budget_usd. Keep the
+        # original cap (verified with claude-agent-sdk 0.2.188); an unknown cost ends the loop.
+        spent = result.total_cost_usd if result.total_cost_usd is not None else budget_usd
+        options = replace(options, resume=result.session_id, max_turns=remaining_turns)
 
 
 def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, timeout_s: float = 900,
@@ -216,18 +222,21 @@ def parser(command: str = "edit") -> argparse.ArgumentParser:
     if command != 'finalize':
         parser.add_argument('--backend', choices=('claude', 'codex'), required=True)
         parser.add_argument('--model')
-        parser.add_argument('--timeout', type=float, default=900)
+        # Resume defaults stay unset so a parent pipeline keeps its saved limits.
+        parser.add_argument('--timeout', type=float, default=None if command == 'resume' else 900,
+                            help='Session seconds, default 900 (resume: the saved pipeline value)')
         parser.add_argument('--max-turns', type=int, help='Claude turn limit, default 30')
         parser.add_argument('--budget-usd', type=float, help='Claude dollar budget, default 5')
         parser.add_argument('--token-budget', type=int,
                             help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
-        parser.add_argument('--max-repairs', type=int, default=2, help='Validation repair attempts, default 2; 0 disables')
+        parser.add_argument('--max-repairs', type=int, default=None if command == 'resume' else 2,
+                            help='Validation repair attempts, default 2 (resume: the saved pipeline value); 0 disables')
         parser.add_argument('prompt', nargs='?', default=None if command == 'resume' else '')
     if command == 'edit':
         from .prompts import TASKS
         parser.add_argument('--agent-task', choices=TASKS)
         parser.add_argument('--agent-target', nargs='+')
-        parser.add_argument('--anatomy-reference', action='append', default=[], metavar='ORGAN=METADATA')
+        parser.add_argument('--anatomy-reference', action='append', default=[], metavar='ORGAN=REFERENCE')
         parser.add_argument('--major-branching', dest='include_major_branches', action='store_true', default=False,
                             help='Include reference-covered major vessel branches (off by default)')
         parser.add_argument('--fragment-area-mm2', type=float, default=1.0)
@@ -346,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
             cli.error('Codex uses --token-budget. --max-turns and --budget-usd apply only to Claude')
         if args.backend == 'claude' and args.token_budget is not None:
             cli.error('--token-budget applies only to Codex')
-        if args.max_repairs < 0:
+        if args.max_repairs is not None and args.max_repairs < 0:
             cli.error('max-repairs must be nonnegative')
         for value in (args.timeout, args.max_turns, args.budget_usd, args.token_budget):
             if value is not None and not 0 < value < float('inf'):
@@ -370,6 +379,9 @@ def main(argv: list[str] | None = None) -> int:
         print(PatientWorkflow.resume(workspace.parent, output=output, token_budget=args.token_budget,
                                     blender_mode=args.blender_mode, agent_overrides=overrides))
         return 0
+    if command == 'resume':
+        args.timeout = 900 if args.timeout is None else args.timeout
+        args.max_repairs = 2 if args.max_repairs is None else args.max_repairs
     checkpoint, edited = workspace / 'edited.blend', workspace / 'edited.usdc'
     if command != 'edit':
         if not all((workspace / name).is_file() for name in ('edit.json', 'original.usdc')):

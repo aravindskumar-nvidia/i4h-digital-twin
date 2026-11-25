@@ -20,7 +20,7 @@ class AgentOptions:
     budget_usd: float | None = None
     token_budget: int | None = None
     max_repairs: int = 2
-    anatomy_references: dict[str, Path] = field(default_factory=dict)
+    anatomy_references: dict[str, str | Path] = field(default_factory=dict)
     include_major_branches: bool = False
     fragment_area_mm2: float = 1.0
     task: str | None = None

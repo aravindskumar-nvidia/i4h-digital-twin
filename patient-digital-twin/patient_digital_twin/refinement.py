@@ -10,11 +10,11 @@ from uuid import uuid4
 
 import numpy as np
 
-from .references import MAJOR_BRANCHES, load_references
+from .references import MAJOR_BRANCHES, load_references, write_reference_files
 
 COLON_REPAIR = """For COLON, work in this order: (1) correct overall course, caliber and topology;
 (2) remove segmentation stair-stepping; (3) preserve or restore regional haustra.
-Inspect the major colon regions and their transitions from several views. Correct
+Use the initial overview to locate the first demonstrated course/topology defect. Correct
 flattened/collapsed spans, implausible narrow bridges, accidental fusions and
 shortcuts between neighboring limbs before adding surface decoration. Preserve
 patient placement and the course supported by surviving anatomy, not inherited
@@ -41,8 +41,8 @@ def vessel_repair_guidance(targets, include_major_branches=False):
     if not vessels:
         return ''
     prompt = f"""For selected VESSELS ({', '.join(vessels)}), correct course, caliber and
-branch topology before smoothing. Inspect gaps, collapsed spans, false bridges,
-and branch junctions from several views. Join fragments only when surviving
+branch topology before smoothing. Locate gaps, collapsed spans, false bridges,
+and branch junctions in the initial geometry check. Join fragments only when surviving
 patient anatomy and the target reference support the same vessel course.
 Preserve patient placement, left/right identity, meaningful taper and supported
 branch origins. Do not merge arteries with veins or connect neighboring vessels
@@ -53,7 +53,8 @@ as inferred. Do not impose the colon's unbranched topology on vessel trees.
 Except for the explicit main-aorta-only mode below, preserve existing supported
 branches. Remove only demonstrated segmentation
 artifacts; never treat a real branch as an artifact solely because it is small.
-Inspect the selected reference GLB from several views before repairing the target.
+Inspect the selected reference GLB for the first planned repair before editing.
+Add reference views when needed to resolve a specific course or branch ambiguity.
 Compare each selected branch origin and junction against the reference and surviving
 patient anatomy. For veins, major branches include tributaries. Reference coverage
 is guidance, not proof of patient anatomy; report missing or ambiguous junctions.
@@ -79,19 +80,8 @@ def prepare_references(workspace, references, include_major_branches=False, frag
         if target not in settings['paths']:
             raise ValueError(f'Reference target is not in the patient asset: {organ}')
         folder = workspace / 'references' / organ
-        folder.mkdir(parents=True)
-        shutil.copy2(item['model'], folder / 'reference.glb')
-        metadata = dict(item['metadata'], file='reference.glb')
-        for key, original in [('license', metadata['license']['text']), ('source', metadata['source']['evidence'])]:
-            filename = 'LICENSE.txt' if key == 'license' else 'source' + Path(original).suffix
-            shutil.copy2(item['directory'] / original, folder / filename)
-            metadata[key] = dict(metadata[key], **({'text': filename} if key == 'license' else {'evidence': filename}))
-        (folder / 'ATTRIBUTION.txt').write_text(metadata['attribution'] + '\nSource: ' + metadata['source']['url']
-            + '\nLicense: CC BY 4.0 (LICENSE.txt)\nChanges: ' + metadata['changes']
-            + '\nLibrary credits: ' + ', '.join(metadata.get('library_credits', []))
-            + '\nSource evidence: ' + metadata['source']['evidence'] + '\n')
-        shutil.copy2(item['directory'] / metadata['structures'], folder / metadata['structures'])
-        (folder / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        # Per-reference credit and listing files are generated here, not stored in the catalog.
+        metadata = write_reference_files(item, folder)
         records[organ] = dict(target=target, file=str(folder / 'reference.glb'), nodes=item['nodes'],
                               branches=item['branches'], metadata=metadata)
     settings['references'] = records
@@ -113,7 +103,7 @@ and result_images (nonempty workspace-relative image paths). Record unresolved d
 without repairing topology outside the requested scope.
 '''
     return f'''\nComplete the target structures using these anatomical references: {json.dumps({n: {'nodes': r['nodes'], 'major_branches': r['branches'], 'description': r['metadata'].get('description', ''), 'limitations': r['metadata'].get('limitations', [])} for n, r in records.items()})}.
-Reference scenes are named I4H Reference <organ> <session token>. Inspect them for shape and topology.
+Reference scenes are named I4H Reference <organ> <session token>. Inspect the shape/topology relevant to the first planned edit, then act when supported. Expand inspection as subsequent edits require it.
 {COLON_REPAIR if 'colon' in records else ''}
 {vessel_repair_guidance(records, include_major_branches)}
 If a reference lacks a requested feature, report that limitation instead of treating
@@ -129,7 +119,7 @@ Before finishing, use Blender Python to write {report!r} as JSON keyed by target
 Each entry must also contain reference_review with nonempty observed_features (list of strings),
 preserved_features, generated_features, unresolved_features (lists of strings), and
 reference_images and result_images (nonempty lists of workspace-relative image paths).
-Save those actual comparison images with look before reporting completion. Describe
+Save those actual comparison images with look before reporting completion; reuse saved before/reference views when unchanged. Describe
 the features visible in those images; do not claim a feature is present just because
 the mesh is connected. For colon explicitly record whether haustra were preserved,
 inferred, or remain unresolved. This is review evidence, not automatic anatomical validation.

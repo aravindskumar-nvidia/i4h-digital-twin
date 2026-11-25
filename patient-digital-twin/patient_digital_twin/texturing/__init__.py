@@ -79,13 +79,15 @@ def check_runtime(runtime: TextureRuntime) -> dict:
 
 def texture_mesh(
     mesh: MeshGeometry, reference: TextureReference, options: TextureOptions | None = None, *,
-    runtime: TextureRuntime, workspace: str | Path,
+    runtime: TextureRuntime, workspace: str | Path, identity: dict | None = None,
 ) -> TextureResult:
     """Generate appearance on an existing mesh without modifying its coordinates.
 
     Completed inference is reused for identical geometry, tile, options and model
     identity. Each attempt has its own directory; failures retain their diagnostics.
     UV seams may duplicate vertices. The returned vertex map proves triangle identity.
+    Pass identity=check_runtime(runtime) when texturing several meshes to run the
+    preflight once instead of once per mesh.
     """
     from PIL import Image
 
@@ -97,7 +99,7 @@ def texture_mesh(
     with Image.open(reference.image) as image:
         if image.width != image.height:
             raise ValueError('Texture conditioning requires a square image')
-    identity = check_runtime(runtime)
+    identity = check_runtime(runtime) if identity is None else identity
     config = dict(asdict(options), texture_square=str(reference.image),
                   trellis_root=str(Path(runtime.checkout).expanduser().resolve()),
                   model='microsoft/TRELLIS.2-4B')
