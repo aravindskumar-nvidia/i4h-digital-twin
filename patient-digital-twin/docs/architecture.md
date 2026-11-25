@@ -25,6 +25,12 @@ for migration only; nothing in `patient_digital_twin` imports it. See the
 Heavy optional dependencies (OpenUSD, VTK, MONAI/PyTorch, SimpleITK, trimesh) are imported
 only inside the functions that need them, so `import patient_digital_twin` stays light.
 
+The optional [Blender editing layer](blender.md) prepares exported assets for
+editing and merges geometry/material changes into the original USD contract.
+It retains CT metadata and bundle references and has no agent SDK dependency.
+The optional [agent CLI](agents.md) wraps this handoff with Claude/Codex and upstream
+Blender MCP, leaving asset validation and export in the editing layer.
+
 ## Key classes
 
 ```mermaid
@@ -128,7 +134,7 @@ flowchart LR
    `body_to_imaging`. The NV importers run their model, then hand the label NIfTI to
    `segmentation_anatomy`, which uses the same path. `SimpleImporter` loads meshes as-is.
 2. **Attach CT (optional).** `attach_scan` keeps the scan's native array order, frame
-   (RAS or LPS), and units; no resampling happens anywhere in the package.
+   (RAS or LPS), and units; attachment does not resample. Explicit scan-volume conversion can request resampling.
 3. **Topology (optional).** `extract_topology` voxelizes each vessel/airway mesh on a
    grid in its local frame and skeletonizes it, storing a `CenterlineGraph` on the
    structure.

@@ -11,7 +11,7 @@ patient package, NumPy and the `usd` extra installed.
 | --- | --- | --- |
 | Standalone `.usd`, `.usda`, `.usdc` | `body.export_to_usd(path)` | Presentation stage; anatomy, stored centerlines and embedded attached CT |
 | `patient_anatomy.usdc` plus `patient_twin.yaml` | `body.export_patient_twin(new_directory)` | Patient-frame anatomy and stored centerlines; HU CT and spatial metadata are separate bundle files |
-| Both of the above | `examples/pipeline.py` | Adds `human_body.usdc` alongside the patient bundle |
+| Both of the above | `examples/pipeline.py` or `PatientWorkflow.run(..., format="bundle")` | Adds `human_body.usdc` alongside the patient bundle |
 
 All patient stages have default prim `/HumanBody` and Z-up metadata.
 With CT, `metersPerUnit` matches the scan's declared spatial units; anatomy-only
@@ -35,8 +35,8 @@ Use `body` from the s0011 steps in the [package usage guide](../README.md).
 Run the snippets below in order from the repository root. CT is optional;
 attach it with `attach_scan()` when needed.
 
-Standalone export uses an identity root and current structure transforms.
-It preserves the live body's transforms and visibility. Do not apply a second
+Standalone export stores the body-to-scan registration on the root and retains
+current structure transforms below it. It preserves the live body's placement and visibility. Do not apply a second
 axis conversion to an exported stage.
 
 Schema-2 bundle anatomy is authored in the scan's `RAS` or `LPS` physical frame
@@ -156,6 +156,18 @@ Bundle per-structure graphs are stored only on their USD prims. Composite naviga
 `centerline_points.npy` / `centerline_radii.npy` use the declared scan physical
 frame and units. `centerline_edges.npy` stores index pairs. Navigation arrays
 are generated when attached CT and `vessel_names` request them.
+
+Bundles with navigation arrays record their vessel selection in
+`patient_twin.yaml`.
+
+```yaml
+navigation:
+  vessel_names:
+    - aorta
+```
+
+The editor reads this selection automatically. For older bundles, it uses
+the sole vessel or requires an explicit selection before editing starts.
 
 ## Open in Isaac Sim
 

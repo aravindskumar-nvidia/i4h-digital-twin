@@ -62,10 +62,10 @@
 
 We use pre-commit hooks to ensure code quality. To set up pre-commit:
 
-1. Install pre-commit:
+1. Install pre-commit with uv:
 
    ```bash
-   pip install pre-commit
+   uv tool install pre-commit
    ```
 
 2. To check your code before committing:
@@ -82,12 +82,12 @@ We use pre-commit hooks to ensure code quality. To set up pre-commit:
 
 ## Running Tests
 
-Before submitting your contribution, ensure relevant package tests pass:
+Use `uv` for Python environments, dependencies, commands and builds. Before submitting your contribution, ensure relevant package tests pass:
 
 ```bash
 # Patient digital twin — anatomy and bundled imaging-to-mesh
 cd patient-digital-twin
-uv sync --extra dev && uv run pytest
+uv run --extra dev pytest
 ```
 
 ## Reporting issues

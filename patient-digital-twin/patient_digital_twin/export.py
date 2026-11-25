@@ -43,10 +43,67 @@ from .geometry import (
 )
 
 if TYPE_CHECKING:
+    from .anatomy import MeshGeometry
     from .body import HumanBody
     from .scan_volume import ScanVolume
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc"}
+
+
+def _surface_material(prim: Any, geometry: MeshGeometry, output: Path) -> None:
+    """Write portable texture references and preserve normals across UV seams."""
+    from pxr import Gf, Sdf, UsdGeom, UsdShade, Vt
+
+    mesh = UsdGeom.Mesh(prim)
+    assert geometry.vertices is not None
+    count = len(geometry.vertices)
+    if geometry.normals is not None:
+        normals = np.asarray(geometry.normals, dtype=np.float32)
+        if normals.shape != (count, 3) or not np.isfinite(normals).all():
+            raise ValueError("Surface normals must be finite (N, 3)")
+        mesh.CreateNormalsAttr(Vt.Vec3fArray.FromNumpy(normals))
+        mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+    if geometry.material is None:
+        return
+    uv = np.asarray(geometry.uv, dtype=np.float32)
+    if uv.shape != (count, 2) or not np.isfinite(uv).all():
+        raise ValueError("Textured meshes require finite per-vertex UV coordinates (N, 2)")
+    material = geometry.material
+    if not np.isfinite(material.roughness) or not 0 <= material.roughness <= 1:
+        raise ValueError("Material roughness must be in [0, 1]")
+    UsdGeom.PrimvarsAPI(prim).CreatePrimvar(
+        "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex
+    ).Set(Vt.Vec2fArray.FromNumpy(uv))
+    bound, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+    stage, root = prim.GetStage(), bound.GetPath()
+    shader = UsdShade.Shader.Get(stage, root.AppendChild("Surface"))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
+    reader = UsdShade.Shader.Define(stage, root.AppendChild("UV"))
+    reader.CreateIdAttr("UsdPrimvarReader_float2")
+    reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+    reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+    for name, source, color_space, channel, kind in (
+        ("diffuseColor", material.base_color, "sRGB", "rgb", Sdf.ValueTypeNames.Color3f),
+        ("roughness", material.roughness_map, "raw", "r", Sdf.ValueTypeNames.Float),
+    ):
+        source_path = Path(source).resolve()
+        data = source_path.read_bytes()
+        relative = Path("textures") / (hashlib.sha256(data).hexdigest() + source_path.suffix.lower())
+        target = output.parent / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_bytes(data)
+        texture = UsdShade.Shader.Define(stage, root.AppendChild(name + "Texture"))
+        texture.CreateIdAttr("UsdUVTexture")
+        texture.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(Sdf.AssetPath(relative.as_posix()))
+        texture.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set(color_space)
+        texture.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("clamp")
+        texture.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("clamp")
+        texture.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(reader.ConnectableAPI(), "result")
+        if name == "roughness":
+            texture.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(material.roughness))
+        texture.CreateOutput(channel, kind)
+        shader.CreateInput(name, kind).ConnectToSource(texture.ConnectableAPI(), channel)
 
 
 def _scan(body: HumanBody) -> ScanVolume | None:
@@ -241,6 +298,7 @@ def write_usd(
         color = (0.88, 0.84, 0.69) if structure.kind.value == "bone" else tuple(0.25 + 0.65 * v / 255 for v in digest[:3])
         matrix = structure.local_to_world if placement is None else placement @ structure.local_to_body
         prim = mesh(prims[name], vertices, faces, color, 1.0, matrix, structure.enabled)
+        _surface_material(prim, structure.mesh, path)
         prim.SetDisplayName(name)
         prim.SetCustomDataByKey("anatomy:name", name)
         prim.SetCustomDataByKey("anatomy:kind", structure.kind.value)
@@ -352,6 +410,8 @@ def export_patient_twin(
             "transforms": {} if scan is None else {"voxel_to_scan": scan.ijk_to_world.tolist()},
             "artifacts": artifacts,
         }
+        if mask is not None:
+            manifest["navigation"] = {"vessel_names": list(vessel_names)}
         if world_from_patient_m is not None:
             manifest["transforms"]["world_from_patient_m"] = rigid_transform(world_from_patient_m).tolist()
         (folder / "patient_twin.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))

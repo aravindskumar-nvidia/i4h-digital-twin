@@ -70,6 +70,18 @@ def rigid_transform(value: ArrayLike) -> NDArray[np.float64]:
     return m
 
 
+def centerline_spacing(points: ArrayLike, edges: ArrayLike) -> float:
+    """Infer the local grid spacing of a pipeline 26-neighbor centerline graph."""
+    points, edges = np.asarray(points), np.asarray(edges)
+    if edges.ndim != 2 or edges.shape[1:] != (2,) or not len(edges):
+        raise ValueError('Original centerline has invalid edges')
+    steps = points[edges[:, 1]] - points[edges[:, 0]]
+    spacing = float(np.median(np.max(np.abs(steps), axis=1)))
+    if not np.isfinite(spacing) or spacing <= 0:
+        raise ValueError('Original centerline has invalid grid spacing')
+    return spacing
+
+
 def validate_triangles(
     vertices: ArrayLike, faces: ArrayLike, *, name: str = "mesh"
 ) -> tuple[NDArray[np.float64], NDArray[np.integer]]:

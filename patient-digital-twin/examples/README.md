@@ -1,9 +1,9 @@
 # Patient examples
 
-Run these commands from `patient-digital-twin/` with Python 3.10+:
+Follow the [patient install](../README.md#install), then run from
+`patient-digital-twin/` with that environment active:
 
 ```bash
-pip install -e '.[pipeline]'
 git lfs pull
 python examples/pipeline.py --source sample --anatomy aorta --output /tmp/s0011-patient
 ```

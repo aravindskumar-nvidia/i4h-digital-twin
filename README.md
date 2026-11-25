@@ -18,6 +18,10 @@ i4h-digital-twin/
 
 Convert clinical or synthetic imaging into vessel/anatomy artifacts and OpenUSD meshes.
 
+[Blender asset editing](patient-digital-twin/docs/blender.md)
+modifies exported geometry, materials and textures while preserving the patient asset contract.
+[Claude/Codex orchestration](patient-digital-twin/docs/agents.md) automates this editing step.
+
 | Component | Status | Purpose |
 | --- | --- | --- |
 | [`patient_digital_twin.export`](./patient-digital-twin/patient_digital_twin/export.py) | Patient module | USD, native HU scan bundles, vessel masks and centerlines |
@@ -27,11 +31,33 @@ Convert clinical or synthetic imaging into vessel/anatomy artifacts and OpenUSD 
 
 ### Quick start — installable packages
 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first.
+
 ```bash
-# Patient anatomy and bundled meshing
-cd patient-digital-twin
-uv sync --extra dev --extra usd
+# Run from the repository root (Python 3.10+).
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e './patient-digital-twin[editing]'
+patient-digital-twin setup editing
 ```
+
+This installs anatomy import/export and both Codex and Claude agent SDKs.
+`setup` reuses a compatible Blender or installs the verified version on Linux x86_64;
+subsequent runs find it automatically. Authenticate your chosen agent backend before editing.
+On headless Ubuntu, setup reports if `sudo apt install xvfb xauth` is needed.
+
+For basic import/export only, install `./patient-digital-twin[pipeline]` instead and skip `setup`.
+Activate the environment once per terminal; run `python` and `patient-digital-twin` normally afterward.
+Continue with the [patient walkthrough](patient-digital-twin/README.md).
+To add generated textures in the same environment:
+
+```bash
+uv pip install -e './patient-digital-twin[texture]'
+patient-digital-twin setup texture
+```
+
+Texture setup needs an NVIDIA GPU and the CUDA development toolkit. See
+[backend setup](patient-digital-twin/docs/environment.md) for system prerequisites and model inference.
 
 Python API example (segmentation → patient anatomy meshes):
 
@@ -73,18 +99,20 @@ Shared / typical prerequisites (exact versions depend on the component):
 | --- | --- |
 | OS | Linux (x86_64) recommended |
 | Python | 3.10+ for installable packages (`patient_digital_twin` and the other twin modules) |
-| GPU | Optional for NV-Segment / NV-Generate / Isaac Sim; CPU paths exist for basic vessel masking and mesh conversion |
-| Tooling | `uv` or `pip`; Isaac Sim when loading USD in simulation |
+| GPU | Required for the documented model-inference and texture workflows; not required for basic mask import and USD export |
+| Tooling | `uv`; Isaac Sim when loading USD in simulation |
 
-Installable packages do **not** require Conda. Hospital / robot twin guides may assume Isaac Sim, Isaac Lab, or XR runtimes — see each component README.
+Use `uv` for Python environments, package installation, development commands and builds.
+Installable packages do **not** require Conda. The 3DGUT reconstruction container retains
+its upstream Conda-based installer; this is internal to the container.
+Hospital / robot twin guides may assume Isaac Sim, Isaac Lab, or XR runtimes — see each component README.
 
 ## Python Packages
 
-Install every top-level digital twin module from the repository root:
+With the virtual environment above active, install every top-level digital twin module from the repository root:
 
 ```bash
 uv pip install .
-# or: pip install .
 ```
 
 Install one top-level module by supplying its directory instead:
@@ -98,11 +126,8 @@ uv pip install ./robot-digital-twin
 
 The corresponding Python imports are `patient_digital_twin`, `hospital_digital_twin`, `sim_ready_assets`, and `robot_digital_twin`.
 
-To install patient USD support in the repository's own `.venv`, run from this root:
-
-```bash
-uv sync --extra dev --extra patient-usd
-```
+For the aggregate install with patient export support, use `uv pip install -e '.[patient-pipeline]'`.
+The aggregate package prefixes patient extras with `patient-`; the standalone patient package uses `pipeline`, `dicom`, etc.
 
 ## Development / CI
 

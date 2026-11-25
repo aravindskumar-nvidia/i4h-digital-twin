@@ -6,3 +6,7 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+/output/
+
+# Fresh local dependency sources and downloads
+/.deps/
