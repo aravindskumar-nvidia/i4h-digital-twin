@@ -13,8 +13,8 @@ mesh. Distinguish missing segmentation from anatomy outside scan coverage; do no
 extend scan-boundary endpoints just to resemble a whole reference organ.
 Work from overall shape to topology to surface morphology. Record each inferred
 region and the evidence used. If the reference cannot resolve a connection, report
-that uncertainty instead of inventing certainty. Check whole-organ course and
-local junctions from multiple views before finishing.""",
+that uncertainty instead of inventing certainty. Verify whole-organ course and
+edited junctions; add viewing angles where a connection remains ambiguous.""",
     'repair': """Repair demonstrated defects in the selected anatomy. Inspect connected components,
 open boundaries, non-manifold edges, winding, self-intersections, collapsed spans
 and suspicious bridges. Classify defects before editing: a branch, fold, opening
@@ -49,16 +49,24 @@ patient-specific color from a CT. Compare before/after under identical neutral
 lighting. Keep export-compatible image textures and Principled BSDF materials.""",
 }
 
-COMMON = """Inspect before editing. Save before views, identify the concrete defects relevant to
-this operation, and make a short ordered plan. Edit only the named targets; leave
+COMMON = """Make useful edits early. Start with one whole-target before view and a batched
+geometry check for the requested operation. Inspect the reference features needed
+for the first proposed edit and capture its before-detail view. State a brief plan,
+then apply that bounded edit once
+the evidence supports it. Resolve uncertainty affecting that edit with focused
+inspection; avoid an exhaustive survey or repeated planning before starting.
+Edit only the named targets; leave
 other anatomy, CT registration, units, object identities and patient placement intact.
 Use references as read-only guidance. Keep arteries and veins distinct. Do not merge
 separately labeled structures or manufacture branch extensions unless major branching
 was explicitly enabled. Preserve existing supported branches unless the supplied
 reference-completion instructions explicitly request a main-aorta-only result.
-Work in bounded steps and inspect after each meaningful change. Spend the available
-budget on the highest-priority defects, reserving time for comparison images, the
-required report and check_asset. Do not repeatedly inspect unchanged views.
+Batch related measurements and compatible local edits in one Python call. Check
+the relevant geometry metrics after each batch; capture another image when the
+result needs visual verification or a specific uncertainty must be resolved.
+Reuse unchanged before/reference views. Stop iterating when the requested work
+is complete and checks pass; do not spend the remaining budget on optional polish.
+Reserve time for comparison images, the required report and check_asset.
 Before finishing, save comparable whole-target and detail views, run check_asset,
 and resolve reported failures. Summarize actual changes, checks performed, remaining
 defects and inferred anatomy. An unresolved defect is not a successful repair.
