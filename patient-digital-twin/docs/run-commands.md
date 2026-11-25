@@ -1,151 +1,181 @@
 # Run commands
 
-Start with the [patient install](../README.md#install), then install only the [optional backends](environment.md) used by your command. Run from the repository root. Replace `/path/to/...` with your own files. Examples use **GPT-6 Astra**, virtual Blender and a **300,000-token budget**. Agent timeout: **15 minutes**. Output paths must be new.
+One patient, one command per step, in order. Each step writes a new folder under
+`$OUT`, so you can compare results. Steps 6, 8 and 11 read the output of an earlier
+step; every other step runs on its own.
 
-## Activate
+## Before you start
+
+Follow the [patient install](../README.md#install) and install the
+[optional backends](environment.md) for the steps you want: NV-Segment for all
+steps, agent editing for steps 4 to 9, texture generation for steps 3 and 5.
+Run from the repository root.
 
 ```bash
 source .venv/bin/activate
+CT=/path/to/patient/ct.nii.gz
+OUT=output/my-patient
 ```
 
-## Resume a saved run
+Output paths must not exist yet. Change `OUT` or delete a step's folder to rerun it.
 
-Use a checkpoint from a new run. Resume keeps its saved model and continues editing, textures and export.
-
-```bash
-patient-digital-twin resume \
-  --workspace /path/to/run-directory \
-  --token-budget 300000 \
-  --blender-mode virtual
-```
-
-## Four organs: complete colon and aorta, include branches, texture all four
+## 1. Export the original anatomy
 
 ```bash
 patient-digital-twin \
   --source nvsegment \
-  --input /path/to/patient/ct.nii.gz \
+  --input "$CT" \
   --classes liver gallbladder colon aorta \
-  --agent-task complete \
-  --major-branching \
-  --agent-model gpt-6-astra \
-  --token-budget 300000 \
-  --blender-mode virtual \
-  --anatomy-reference colon=voxel-man-colon-male-15882019 \
-  --anatomy-reference aorta=hra-blood-vasculature-female-v1.3 \
-  --default-textures \
   --format bundle \
-  --output "output/s0878-four-organs-$(date +%Y%m%d-%H%M%S)"
+  --output "$OUT/baseline"
 ```
 
-Includes aorta navigation. Remove `--major-branching` for main-aorta-only completion.
+## 2. Clean up the surfaces
 
-## Whole patient: complete colon and texture available structures
+Removes tiny and distant fragments and smooths voxel steps.
 
 ```bash
 patient-digital-twin \
   --source nvsegment \
-  --input /path/to/patient/ct.nii.gz \
-  --classes all \
-  --agent-task complete \
-  --agent-model gpt-6-astra \
-  --token-budget 300000 \
-  --blender-mode virtual \
-  --anatomy-reference colon=voxel-man-colon-male-15882019 \
-  --default-textures \
+  --input "$CT" \
+  --classes liver gallbladder colon aorta \
   --format bundle \
-  --output "output/s0878-whole-patient-$(date +%Y%m%d-%H%M%S)"
+  --cleanup \
+  --output "$OUT/cleanup"
 ```
 
-`all` includes every detected supported structure. Only colon is agent-edited. No navigation.
-
-## Whole patient: textures, no agent
+## 3. Generate textures on the original geometry
 
 ```bash
 patient-digital-twin \
   --source nvsegment \
-  --input /path/to/patient/ct.nii.gz \
-  --classes all \
-  --default-textures \
+  --input "$CT" \
+  --classes liver gallbladder colon aorta \
   --format bundle \
-  --output "output/s0878-textured-$(date +%Y%m%d-%H%M%S)"
+  --no-cleanup \
+  --default-textures \
+  --output "$OUT/textures"
 ```
 
-## Aorta only: completion, branches, texture and navigation
+## 4. Clean up, then refine the liver with the agent
 
 ```bash
 patient-digital-twin \
   --source nvsegment \
-  --input /path/to/patient/ct.nii.gz \
-  --classes aorta \
-  --agent-task complete \
-  --major-branching \
-  --agent-model gpt-6-astra \
-  --token-budget 300000 \
-  --blender-mode virtual \
-  --anatomy-reference aorta=hra-blood-vasculature-female-v1.3 \
-  --default-textures \
+  --input "$CT" \
+  --classes liver gallbladder colon aorta \
   --format bundle \
-  --output "output/s0878-aorta-$(date +%Y%m%d-%H%M%S)"
+  --cleanup \
+  --agent-task refine \
+  --agent-target liver \
+  --blender-mode virtual \
+  --output "$OUT/refine"
 ```
 
-## Existing patient: repair colon
+## 5. Clean up, refine the liver, then generate textures
+
+`--workspace` keeps the checkpoint that step 11 resumes.
+
+```bash
+patient-digital-twin \
+  --source nvsegment \
+  --input "$CT" \
+  --classes liver gallbladder colon aorta \
+  --format bundle \
+  --cleanup \
+  --agent-task refine \
+  --agent-target liver \
+  --blender-mode virtual \
+  --default-textures \
+  --workspace "$OUT/full-work" \
+  --output "$OUT/full"
+```
+
+## 6. Repair the colon in an existing bundle
+
+Edits the bundle from step 2. No segmentation or texturing runs.
 
 ```bash
 patient-digital-twin-agent \
-  --input /path/to/patient/human_body.usdc \
-  --output "output/s0878-colon-repair-$(date +%Y%m%d-%H%M%S)" \
+  --input "$OUT/cleanup/patient_twin.yaml" \
+  --output "$OUT/repair" \
   --backend codex \
-  --model gpt-6-astra \
-  --token-budget 300000 \
   --blender-mode virtual \
   --agent-task repair \
+  --agent-target colon \
   --anatomy-reference colon=voxel-man-colon-male-15882019
 ```
 
-Standalone editing: no segmentation or new texture generation. Replace `repair` with `complete` to fill missing anatomy.
-
-## Existing patient: refine liver and gallbladder surfaces
+## 7. Complete missing colon anatomy
 
 ```bash
-patient-digital-twin-agent \
-  --input /path/to/patient/human_body.usdc \
-  --output "output/s0878-surface-refinement-$(date +%Y%m%d-%H%M%S)" \
-  --backend codex \
-  --model gpt-6-astra \
-  --token-budget 300000 \
+patient-digital-twin \
+  --source nvsegment \
+  --input "$CT" \
+  --classes liver gallbladder colon aorta \
+  --format bundle \
+  --cleanup \
+  --agent-task complete \
+  --agent-target colon \
+  --anatomy-reference colon=voxel-man-colon-male-15882019 \
   --blender-mode virtual \
-  --agent-task refine \
-  --agent-target liver gallbladder
+  --output "$OUT/complete"
 ```
 
-## Existing patient: correct materials and UVs
+## 8. Edit materials and UVs on the textured bundle
+
+Edits the bundle from step 3. Geometry stays unchanged.
 
 ```bash
 patient-digital-twin-agent \
-  --input /path/to/patient/human_body.usdc \
-  --output "output/s0878-material-correction-$(date +%Y%m%d-%H%M%S)" \
+  --input "$OUT/textures/patient_twin.yaml" \
+  --output "$OUT/materials" \
   --backend codex \
-  --model gpt-6-astra \
-  --token-budget 300000 \
   --blender-mode virtual \
   --agent-task texture \
   --agent-target liver gallbladder colon aorta
 ```
 
-Keeps geometry unchanged. Corrects existing maps; does not generate new tissue tiles.
+## 9. Export aorta navigation, then add major branches
 
-## Optional changes
+```bash
+patient-digital-twin \
+  --source nvsegment \
+  --input "$CT" \
+  --classes aorta \
+  --format bundle \
+  --output "$OUT/aorta"
 
-| Need | Change |
-| --- | --- |
-| Different patient | Replace `--input` with its CT path |
-| Terra model | Use `gpt-6.1-terra` instead of `gpt-6-astra` |
-| Repair instead of completion | Use `--agent-task repair` |
-| No branch expansion | Omit `--major-branching` |
-| No texture generation | Omit `--default-textures` |
-| Custom instructions, pipeline | Add `--agent-prompt "Preserve the visible scar"` |
-| Custom instructions, standalone editor | Append `"Preserve the visible scar"` before `--agent-target`, if present |
-| Resume another pipeline | Use its printed `Pipeline checkpoint` directory as `--workspace` |
+patient-digital-twin-agent \
+  --input "$OUT/aorta/patient_twin.yaml" \
+  --output "$OUT/aorta-branches" \
+  --backend codex \
+  --blender-mode virtual \
+  --agent-task complete \
+  --agent-target aorta \
+  --major-branching \
+  --anatomy-reference aorta=hra-blood-vasculature-female-v1.3
+```
 
-Structures without a default tile keep their existing material. Resume uses the saved model, targets and references.
+## 10. View a result in Isaac Sim
+
+Close the window to return to the terminal.
+
+```bash
+/path/to/isaac-sim/python.sh patient-digital-twin/examples/isaac_sim.py view \
+  "$OUT/full/patient_anatomy.usdc"
+```
+
+## 11. Resume the run from step 5
+
+Continues an interrupted run. If the run already finished, it prints the result path.
+
+```bash
+patient-digital-twin resume \
+  --workspace "$OUT"/full-work/run-*
+```
+
+## More options
+
+Agent limits, models, custom prompts, whole-patient runs and texture overrides are
+described in [refinement](refinement.md).

@@ -55,25 +55,6 @@ For a bounded headless check and a rendered PNG (requires Pillow in that runtime
   --headless --frames 20 --screenshot /tmp/s0011.png
 ```
 
-### Before and after renders
-
-The `compare` action saves `before.png`, `after.png`, and a labeled, side-by-side
-`comparison.png`. Both renders use the same physical camera framing, resolution
-and lighting. Source stages are opened without saving changes.
-
-From the repository root, using Isaac Sim's Python runtime:
-
-```bash
-/path/to/isaac-sim/python.sh patient-digital-twin/examples/isaac_sim.py compare \
-  /path/to/before.usdc /path/to/after.usdc \
-  --output output/comparison --headless
-```
-
-Replace the installation and USD paths. For a completed refinement run, use its
-workspace's `run-*/input.usdc` as the before asset and the output bundle's
-`human_body.usdc` as the after asset. Choose a new output directory. The command
-renders existing assets and exits; it does not rerun refinement or texturing.
-
 ## CT and centerline arrays only
 
 ```python
