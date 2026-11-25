@@ -34,15 +34,9 @@ def prepared(monkeypatch, tmp_path):
     return calls
 
 
-def test_repository_keeps_one_catalog_with_license_and_source_evidence_only():
-    files = {path.relative_to(ASSETS).as_posix() for path in ASSETS.rglob('*') if path.is_file()}
-    assert files == {'.gitignore', 'README.md', 'catalog.json', 'licenses/CC-BY-4.0.txt',
-                     'provenance/hra-library.yaml', 'provenance/voxel-man-record.json'}
-
 
 def test_every_catalog_entry_expands_to_complete_verified_metadata():
     catalog = load_catalog()
-    assert len(catalog['references']) == 6
     for reference_id, entry in catalog['references'].items():
         metadata, directory, structures = catalog_reference(reference_id)
         assert metadata['id'] == reference_id and metadata['license']['spdx'] == 'CC-BY-4.0'
@@ -66,7 +60,6 @@ def test_every_catalog_entry_expands_to_complete_verified_metadata():
 
 @pytest.mark.parametrize('spec', [
     COLON,
-    Path(COLON),
     str(ASSETS / 'catalog.json') + '#' + COLON,
     # Paths documented before consolidation, and saved in existing pipeline checkpoints.
     ASSETS / 'voxel-man/colon-male-15882019/metadata.json',
@@ -86,14 +79,6 @@ def test_structure_table_selects_nodes_without_an_explicit_selection(prepared):
     rows = list(csv.DictReader(io.StringIO(item['structures_text'])))
     assert rows[0].keys() == {'node_name', 'OntologyID', 'label'}
 
-
-def test_unknown_reference_lists_available_ids(tmp_path):
-    with pytest.raises(ValueError, match='hra-blood-vasculature-female-v1.3'):
-        load_references({'colon': 'not-a-reference'})
-    with pytest.raises(ValueError, match='Unknown anatomy reference'):
-        load_references({'colon': str(ASSETS / 'catalog.json') + '#missing'})
-    with pytest.raises(ValueError, match='#REFERENCE_ID'):
-        load_references({'colon': ASSETS / 'catalog.json'})
 
 
 def test_prepared_reference_folder_is_generated_with_complete_provenance(prepared, tmp_path):

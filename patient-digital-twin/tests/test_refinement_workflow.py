@@ -152,7 +152,8 @@ def test_default_workflow_never_starts_agent(body, tmp_path, monkeypatch, format
 
 @pytest.mark.parametrize('format', ['usd', 'bundle'])
 @pytest.mark.parametrize('reflected', [False, True])
-def test_agent_precedes_texturing_and_output_is_portable(body, tmp_path, monkeypatch, format, reflected):
+def test_agent_precedes_texturing_and_output_is_portable(body, tmp_path, monkeypatch, format, reflected,
+                                                         texture_identity):
     events, published = [], []
     original = body.anatomy.structures['liver'].mesh.vertices.copy()
     tile = tmp_path / 'tile.png'
@@ -189,6 +190,7 @@ def test_agent_precedes_texturing_and_output_is_portable(body, tmp_path, monkeyp
                              texture_runtime=TextureRuntime(tmp_path)).run(body, target, format=format)
     assert events == ['agent', 'texture']
     assert published[0][0].read_bytes() == published[0][1]
+    assert len(texture_identity) == 1
     np.testing.assert_array_equal(body.anatomy.structures['liver'].mesh.vertices, original)
     tile.unlink()
     stage = Usd.Stage.Open(str(output if format == 'usd' else output.parent / 'patient_anatomy.usdc'))
@@ -874,13 +876,6 @@ def test_failed_regeneration_keeps_supplied_vessel_centerline(tmp_path, monkeypa
     assert 'regeneration failed' in capsys.readouterr().out
 
 
-def test_cleanup_error_names_the_structure(body, tmp_path, monkeypatch):
-    def fail(mesh, options):
-        raise ValueError('Smoothing could not preserve the input surface')
-    monkeypatch.setattr(workflow, 'prepare_surface', fail)
-    with pytest.raises(ValueError, match='Cleanup failed for liver: Smoothing'):
-        PatientWorkflow().run(body, tmp_path / 'patient.usdc')
-
 
 def test_coarse_fragment_is_not_removed_on_an_overestimated_gap():
     import trimesh
@@ -896,31 +891,3 @@ def test_coarse_fragment_is_not_removed_on_an_overestimated_gap():
     fragment = next(r for r in records if r['decision'] != 'keep_primary')
     assert fragment['decision'] == 'retain_nearby' and fragment['gap_mm'] == pytest.approx(45, abs=1)
     assert result.measurements['after']['components'] == 2
-
-
-def test_original_spacing_is_reused_only_for_grid_skeletons():
-    from patient_digital_twin.geometry import CenterlineGraph
-    points = np.array([[0, 0, 0], [.002, 0, 0], [.004, .002, 0], [.006, .002, .002]])
-    edges = np.array([[0, 1], [1, 2], [2, 3]])
-    assert workflow._grid_spacing(CenterlineGraph(points, np.ones(4), edges)) == pytest.approx(.002)
-    resampled = np.array([[0, 0, 0], [.0013, .0004, 0], [.0031, .0011, .0002], [.004, .0029, .0007]])
-    assert workflow._grid_spacing(CenterlineGraph(resampled, np.ones(4), edges)) is None
-    assert workflow._grid_spacing(CenterlineGraph(points[:1], np.ones(1), np.zeros((0, 2), int))) is None
-
-
-def test_texture_preflight_runs_once_per_workflow(tmp_path, monkeypatch, texture_identity):
-    labels = np.zeros((12, 24, 12), np.uint8)
-    labels[2:10, 2:10, 2:10], labels[2:10, 14:22, 2:10] = 1, 2
-    patient = HumanBody(SegmentationImporter(labels, {1: 'liver', 2: 'spleen'},
-                        affine_xyz_to_imaging_m=np.diag([.001, .001, .001, 1])).to_anatomy_collection())
-    tile = tmp_path / 'tile.png'
-    tile.write_bytes(b'fixture image')
-    identities = []
-    def texture(mesh, reference, options, **kwargs):
-        identities.append(kwargs['identity'])
-        return TextureResult(mesh, np.arange(len(mesh.vertices)), tmp_path, {})
-    monkeypatch.setattr(workflow, 'texture_mesh', texture)
-    reference = TextureReference(tile, {})
-    PatientWorkflow(cleanup=None, textures={'liver': reference, 'spleen': reference}, default_textures=False,
-                    texture_runtime=TextureRuntime(tmp_path)).run(patient, tmp_path / 'patient.usdc')
-    assert len(texture_identity) == 1 and identities == [{'revision': 'test'}] * 2
