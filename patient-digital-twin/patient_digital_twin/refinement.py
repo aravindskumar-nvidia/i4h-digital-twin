@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
@@ -210,6 +211,15 @@ def _check_reference_review(entry, workspace, organ):
 
 def publish_provenance(workspace, folder, report):
     destination = folder / 'refinement'
+    # Keep each older report with its relative reference/inspection paths intact.
+    # The latest report stays at refinement/report.json for existing consumers.
+    if destination.exists():
+        previous = [path for path in destination.iterdir() if path.name != 'history']
+        if previous:
+            archive = destination / 'history' / uuid4().hex
+            archive.mkdir(parents=True)
+            for path in previous:
+                shutil.move(str(path), archive / path.name)
     shutil.copytree(workspace / 'references', destination / 'references',
                     ignore=shutil.ignore_patterns('*.glb'))
     for path in destination.glob('references/*/metadata.json'):

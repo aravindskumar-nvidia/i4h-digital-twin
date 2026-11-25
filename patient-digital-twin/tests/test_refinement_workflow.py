@@ -290,6 +290,51 @@ def test_reference_completion_validation_and_provenance(body, tmp_path):
     for relative in review['reference_images'] + review['result_images']:
         assert (output.parent / 'refinement' / relative).is_file()
 
+    # Reusing the same reference names must not overwrite earlier evidence.
+    prior = output.parent / 'refinement'
+    original_records = {p.relative_to(prior): p.read_bytes() for p in prior.rglob('*') if p.is_file()}
+    for index in range(2):
+        next_workspace = tmp_path / f'edit-{index}'
+        prepare(output, next_workspace)
+        prepare_references(next_workspace, {'liver': reference / 'metadata.json'})
+        for name in ('completion.json', 'reference.png', 'result.png'):
+            shutil.copy2(workspace / name, next_workspace / name)
+        shutil.copy2(next_workspace / 'input.usdc', next_workspace / 'edited.usdc')
+        output = finalize(next_workspace, tmp_path / f'final-{index}')
+        provenance = output.parent / 'refinement'
+        archives = list((provenance / 'history').iterdir())
+        assert len(archives) == index + 1
+        for archive in archives:
+            assert {p.relative_to(archive): p.read_bytes() for p in archive.rglob('*') if p.is_file()} == original_records
+        assert (provenance / 'report.json').is_file()
+    assert {p.relative_to(prior): p.read_bytes() for p in prior.rglob('*') if p.is_file()} == original_records
+
+
+@pytest.mark.parametrize('layout', ['editor', 'bundle', 'sidecar'])
+def test_noop_edit_preserves_prior_provenance(body, tmp_path, layout):
+    import shutil
+    from patient_digital_twin.agent.assets import finalize, prepare
+
+    source = (body.export_patient_twin(tmp_path / 'bundle') if layout == 'bundle'
+              else body.export_to_usd(tmp_path / 'input.usdc'))
+    root = source.with_name(source.name + '.assets') if layout == 'sidecar' else source.parent
+    provenance = root / 'refinement'
+    records = {'report.json': b'{"changes": "prior edit"}',
+               'references/liver/ATTRIBUTION.txt': b'Fixture author',
+               'references/liver/LICENSE.txt': b'CC BY 4.0 fixture',
+               'references/liver/source.json': b'{"source": "fixture"}'}
+    for relative, content in records.items():
+        path = provenance / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    for index in range(2):
+        workspace = tmp_path / f'edit-{index}'
+        prepare(source, workspace)
+        shutil.copy2(workspace / 'input.usdc', workspace / 'edited.usdc')
+        source = finalize(workspace, tmp_path / f'final-{index}')
+        assert {p.relative_to(source.parent / 'refinement').as_posix(): p.read_bytes()
+                for p in (source.parent / 'refinement').rglob('*') if p.is_file()} == records
+
 
 def test_inference_cli_accepts_nonagentic_refinement_flags(body, tmp_path, monkeypatch):
     from patient_digital_twin import __main__ as cli
@@ -543,7 +588,7 @@ def test_pipeline_resume_continues_textures_and_export_without_reediting(body, t
 def test_pipeline_resume_after_agent_failure_runs_remaining_pipeline(body, tmp_path, monkeypatch):
     def interrupted(*args, **kwargs):
         raise RuntimeError('token budget exhausted')
-    def resumed(workspace, output, options):
+    def resumed(workspace, output, options, *, continuation=None):
         import shutil
         assert options.token_budget == 200000 and options.blender_mode == 'virtual'
         output.mkdir()
@@ -576,6 +621,32 @@ def test_editor_resume_routes_back_to_parent_pipeline(tmp_path, monkeypatch):
     assert calls[0][0] == run
     assert calls[0][1]['token_budget'] == 200000
     assert calls[0][1]['agent_overrides']['prompt'] == 'Finish the colon'
+
+
+@pytest.mark.parametrize('continuation', [None, 'Leave the liver unchanged'])
+def test_pipeline_resume_sends_saved_context_and_recovery(body, tmp_path, monkeypatch, continuation):
+    import shutil
+    captured = []
+    def run_blender(args, workspace, settings, output):
+        if args.command == 'edit':
+            (workspace / 'edited.blend').touch()
+            raise RuntimeError('interrupted')
+        captured.append(args.prompt)
+        output.mkdir()
+        shutil.copy2(workspace / 'original.usdc', output / 'input.usdc')
+    monkeypatch.setattr(agent_cli, '_run_blender', run_blender)
+    original = 'Refine the liver without changing connectivity'
+    pipeline = PatientWorkflow(cleanup=None, agent=AgentOptions(original),
+                               workspace=tmp_path / 'work', default_textures=False)
+    with pytest.raises(RuntimeError, match='interrupted'):
+        pipeline.run(body, tmp_path / 'patient.usdc')
+    run = next((tmp_path / 'work').glob('run-*'))
+    saved = (run / 'agent/task_prompt.txt').read_text()
+    argv = ['resume', '--workspace', str(run / 'agent'), '--output', str(tmp_path / 'resumed.usdc'),
+            '--backend', 'codex']
+    assert agent_cli.main(argv + ([continuation] if continuation else [])) == 0
+    assert captured == [saved + ('\n\nAdditional recovery instructions:\n' + continuation if continuation else '')]
+    assert json.loads((run / 'pipeline.json').read_text())['agent']['prompt'] == original
 
 
 def test_checkpoint_preserves_patient_contract(body, tmp_path):
@@ -658,7 +729,8 @@ def test_vessel_branches_default_and_hra_coverage():
             assert selected and set(selected) <= nodes
 
 
-def test_named_prompt_is_saved_and_sent_to_sdk(body, tmp_path, monkeypatch):
+@pytest.mark.parametrize('continuation', [None, 'Leave the liver unchanged'])
+def test_named_prompt_is_saved_and_sent_to_sdk(body, tmp_path, monkeypatch, continuation):
     from patient_digital_twin.agent import AgentOptions
     from patient_digital_twin.agent import __main__ as editor
     captured = []
@@ -672,5 +744,10 @@ def test_named_prompt_is_saved_and_sent_to_sdk(body, tmp_path, monkeypatch):
     assert 'Operation: refine.' in saved and 'Targets: liver.' in saved
     assert 'without completing missing regions' in saved
     (workspace / 'edited.blend').touch()
-    editor.resume_asset(workspace, tmp_path / 'out', AgentOptions(prompt='Continue'))
-    assert captured[-1] == saved
+    editor.resume_asset(workspace, tmp_path / 'out', AgentOptions(prompt='Original task'),
+                        continuation=continuation)
+    expected = saved + ('\n\nAdditional recovery instructions:\n' + continuation if continuation else '')
+    assert captured[-1] == expected
+    argv = ['resume', '--workspace', str(workspace), '--output', str(tmp_path / 'out'), '--backend', 'codex']
+    assert editor.main(argv + ([continuation] if continuation else [])) == 0
+    assert captured[-1] == expected

@@ -222,7 +222,7 @@ def parser(command: str = "edit") -> argparse.ArgumentParser:
         parser.add_argument('--token-budget', type=int,
                             help=f'Codex native token budget, default {DEFAULT_CODEX_TOKEN_BUDGET}')
         parser.add_argument('--max-repairs', type=int, default=2, help='Validation repair attempts, default 2; 0 disables')
-        parser.add_argument('prompt', nargs='?', default='')
+        parser.add_argument('prompt', nargs='?', default=None if command == 'resume' else '')
     if command == 'edit':
         from .prompts import TASKS
         parser.add_argument('--agent-task', choices=TASKS)
@@ -313,15 +313,22 @@ def edit_asset(source: str | Path, output: str | Path, options: AgentOptions, *,
     return output / ('patient_twin.yaml' if settings['manifest'] is not None else source_path.name)
 
 
-def resume_asset(workspace: Path, output: Path, options: AgentOptions) -> Path:
+def _resume_prompt(workspace: Path, continuation: str | None, fallback: str = '') -> str:
+    saved = workspace / 'task_prompt.txt'
+    prompt = saved.read_text() if saved.is_file() else fallback
+    if continuation:
+        prompt += '\n\nAdditional recovery instructions:\n' + continuation
+    return prompt
+
+
+def resume_asset(workspace: Path, output: Path, options: AgentOptions, *,
+                 continuation: str | None = None) -> Path:
     """Resume the editor within a parent pipeline, then return to that pipeline."""
     settings = load_workspace(workspace)
     if not (workspace / 'edited.blend').is_file():
         raise ValueError('Agent resume requires edited.blend')
-    saved_prompt = workspace / 'task_prompt.txt'
-    continuation = saved_prompt.read_text() if saved_prompt.is_file() else options.prompt
     args = argparse.Namespace(command='resume', mcp_config=None, blender_mode=options.blender_mode,
-        prompt=continuation, backend=options.backend, model=options.model,
+        prompt=_resume_prompt(workspace, continuation, options.prompt), backend=options.backend, model=options.model,
         max_turns=options.max_turns, budget_usd=options.budget_usd,
         token_budget=options.token_budget, timeout=options.timeout_s, max_repairs=options.max_repairs)
     _run_blender(args, workspace, settings, output)
@@ -388,6 +395,8 @@ def main(argv: list[str] | None = None) -> int:
             (workspace / 'task_prompt.txt').write_text(args.prompt)
         else:
             settings = load_workspace(workspace, vessel_names=args.vessel_names)
+            if command == 'resume':
+                args.prompt = _resume_prompt(workspace, args.prompt)
         needs_export = (command != 'finalize' or not edited.is_file()
                         or (checkpoint.is_file() and checkpoint.stat().st_mtime_ns > edited.stat().st_mtime_ns))
         if needs_export:

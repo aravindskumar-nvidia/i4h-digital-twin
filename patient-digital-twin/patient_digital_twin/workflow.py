@@ -65,7 +65,8 @@ class PatientWorkflow:
             vessel_names: Sequence[str] = (), centerline_spacing_mm: float = 1.5,
             ct_exterior: bool = False, topology_names: Sequence[str] = (),
             patient_id: str | None = None, world_from_patient_m=None,
-            skin_opacity: float = 0.15, _resume_run: Path | None = None) -> Path:
+            skin_opacity: float = 0.15, _resume_run: Path | None = None,
+            _continuation: str | None = None) -> Path:
         from .export import USD_SUFFIXES
 
         output = Path(output).expanduser().resolve()
@@ -149,7 +150,8 @@ class PatientWorkflow:
             if _resume_run:
                 from .agent.__main__ import resume_asset
                 published = run / 'edited' / 'input.usdc'
-                edited = published if published.is_file() else resume_asset(run / 'agent', run / 'edited', self.agent)
+                edited = published if published.is_file() else resume_asset(
+                    run / 'agent', run / 'edited', self.agent, continuation=_continuation)
             else:
                 source = body.export_to_usd(run / 'input.usdc')
                 _annotate_cleanup(source, report['cleanup'])
@@ -217,9 +219,11 @@ class PatientWorkflow:
             if not result.is_file():
                 raise FileNotFoundError(f'Completed pipeline output is missing: {result}')
             return result
+        overrides = dict(agent_overrides or {})
+        continuation = overrides.pop('prompt', None)
         options = state['agent']
         if options:
-            options.update(agent_overrides or {})
+            options.update(overrides)
             options['anatomy_references'] = {name: Path(path) for name, path in options['anatomy_references'].items()}
             if token_budget is not None:
                 options['token_budget'] = token_budget
@@ -250,7 +254,7 @@ class PatientWorkflow:
             texture_runtime=TextureRuntime(checkout=Path(runtime['checkout']), timeout_s=runtime['timeout_s']) if runtime else None,
             workspace=run.parent)
         return workflow.run(load_body(run / 'body'), output or state['output'],
-                            **state['export'], _resume_run=run)
+                            **state['export'], _resume_run=run, _continuation=continuation)
 
 
 def _annotate_cleanup(path, cleanup):

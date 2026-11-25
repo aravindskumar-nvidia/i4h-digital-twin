@@ -55,9 +55,16 @@ patient-digital-twin-agent resume --workspace output/.asset-edit-xxxxx \
 `finalize` uses the exported USD, re-exporting `edited.blend` if newer or if the
 USD is missing. `resume` opens that checkpoint for further agent edits. Both require
 a new output directory and the referenced source files, and retain the workspace.
+Resume reloads the saved task instructions and appends any supplied recovery
+instructions, both for standalone edits and when continuing a parent pipeline.
+Omit the prompt to continue with the saved task alone.
 
 The returned USD or manifest is the new Isaac input; source and CT data are
 preserved. For Claude, use `--backend claude`; its SDK is included in `editing`.
+Existing reference provenance is carried into subsequent outputs, including
+records from a workflow USD's `.assets` directory. When an edit adds a new
+reference report, previous reports and their supporting files are retained under
+`refinement/history/`; the latest report remains at `refinement/report.json`.
 
 See [Blender asset editing](blender.md) for supported edits and the output contract.
 Navigation uses the vessel selection saved in the bundle. Older bundles select

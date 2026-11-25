@@ -149,6 +149,14 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
                 _merge_materials(standalone, edited, [m for m, _ in pairs], [p for _, p in pairs], settings['token'])
                 _copy_textures(standalone, workspace, folder)
                 standalone.Export(str(folder / companion.name))
+        # Workflow USD exports keep their provenance in a per-file sidecar;
+        # editor outputs and bundles keep it alongside the source asset.
+        provenance = source.parent / 'refinement'
+        sidecar = source.with_name(source.name + '.assets') / 'refinement'
+        if manifest is None and sidecar.is_dir():
+            provenance = sidecar
+        if provenance.is_dir():
+            shutil.copytree(provenance, folder / 'refinement')
         if completion is not None:
             from ..refinement import publish_provenance
             publish_provenance(workspace, folder, completion)
