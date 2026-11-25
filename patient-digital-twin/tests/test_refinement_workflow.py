@@ -109,6 +109,7 @@ def test_cleanup_uses_surface_gap_and_preserves_small_primary():
 
 def test_cleanup_history_reaches_immediate_and_later_agents(body, fragmented_surface, tmp_path, monkeypatch):
     import shutil
+
     from patient_digital_twin.agent.assets import prepare
 
     body.anatomy.structures['liver'].mesh = fragmented_surface
@@ -323,6 +324,7 @@ def test_reference_completion_validation_and_provenance(body, tmp_path):
 @pytest.mark.parametrize('layout', ['editor', 'bundle', 'sidecar'])
 def test_noop_edit_preserves_prior_provenance(body, tmp_path, layout):
     import shutil
+
     from patient_digital_twin.agent.assets import finalize, prepare
 
     source = (body.export_patient_twin(tmp_path / 'bundle') if layout == 'bundle'
@@ -845,6 +847,7 @@ def test_cleanup_skips_textured_structure(body, tmp_path):
 
 def test_supplied_centerlines_survive_cleanup(body, tmp_path, capsys):
     from patient_digital_twin.geometry import CenterlineGraph
+
     # A single-node skeleton on a non-tubular structure cannot be regenerated.
     graph = CenterlineGraph(points=np.array([[.006, .006, .006]]), radii=np.array([.004]),
                             edges=np.zeros((0, 2), np.int64))

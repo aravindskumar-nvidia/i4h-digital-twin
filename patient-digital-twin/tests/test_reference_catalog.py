@@ -139,4 +139,3 @@ def test_catalog_accepts_other_organs_and_datasets(tmp_path, monkeypatch):
     path.write_text(json.dumps(catalog))
     with pytest.raises(ValueError, match='CC BY 4.0'):
         load_references({'liver': 'atlas-liver'})
-

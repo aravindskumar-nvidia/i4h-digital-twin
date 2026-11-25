@@ -69,7 +69,7 @@ def _download(source: dict, cache: Path, suffix: str) -> Path:
     if algorithm not in {'sha256', 'md5'} or not re.fullmatch(r'[0-9a-f]+', expected):
         raise ValueError('Reference download requires a supported pinned checksum')
     size = source.get('size_bytes')
-    if size is not None and (type(size) is not int or size <= 0):
+    if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size <= 0):
         raise ValueError('Reference download size_bytes must be a positive integer')
     destination = cache / 'downloads' / (algorithm + '-' + expected + suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)

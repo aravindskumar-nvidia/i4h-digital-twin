@@ -160,6 +160,7 @@ def load_references(references, include_major_branches=False, fragment_area_mm2=
         for required in required_files:
             if not (directory / required).is_file():
                 raise ValueError(f'Missing reference credit/license evidence: {required}')
+        structures_text: str | None
         if structures is not None:
             structures_text = _structures_text(structures)
         else:

@@ -177,7 +177,6 @@ cleanup/agent workflows continue without texture generation. An organ without a 
 failures still stop the run. No unrelated tissue is substituted. Defaults are packaged with the Python
 distribution and checked against recorded checksums.
 
-
 Install `.[texture]` and run `patient-digital-twin setup texture` in the active
 environment. The worker uses native TRELLIS.2 texture weights, its shape encoder,
 and DINOv3 conditioning. See [backend setup](environment.md#texture-generation).

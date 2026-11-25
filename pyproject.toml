@@ -79,3 +79,7 @@ sim_ready_assets = ["*.json"]
 [tool.pytest.ini_options]
 testpaths = ["patient-digital-twin/tests"]
 addopts = "-v --tb=short"
+
+[tool.codespell]
+# Creator given name in the VOXEL-MAN reference credits.
+ignore-words-list = "udo"

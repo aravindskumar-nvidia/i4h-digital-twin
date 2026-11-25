@@ -47,7 +47,11 @@ def validate_cleanup(*, smoothing_iterations=60, hole_radius_mm=2., min_componen
 def _filter_components(source, options):
     """Keep the main surface and nearby significant fragments; record every decision."""
     import vtk
-    from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray, vtk_to_numpy
+    from vtk.util.numpy_support import (
+        numpy_to_vtk,
+        numpy_to_vtkIdTypeArray,
+        vtk_to_numpy,
+    )
 
     parts = sorted(source.split(only_watertight=False, repair=False),
                    key=lambda part: (-part.area, tuple(part.bounds.ravel())))
