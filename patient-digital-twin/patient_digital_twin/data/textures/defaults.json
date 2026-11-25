@@ -242,5 +242,196 @@
     "synthetic": true,
     "prompt": "Use case: scientific-educational. Create one square full-frame tissue material reference tile for a synthetic anatomy visualization. Healthy bowel exterior serosa surface: pale warm pink beige, thin translucent glossy membrane with sparse delicate branching red capillaries. No mucosal folds, no villi. Flat orthographic macro surface patch filling the entire square edge to edge. Soft uniform diffuse illumination, no cast shadows, no baked specular highlights, no perspective, no borders, no text or scale marks, no organ silhouette, no cut edges, no tools. Spatially homogeneous albedo texture, natural restrained color variation, small-scale detail only. Intended as generative appearance conditioning, not a diagnostic photograph. Make opposing edges visually compatible.",
     "limitations": "Appearance conditioning only. Not a patient photograph. Physical scale and seamless repetition are not validated."
+  },
+  "esophagus": {
+    "file": "esophagus.png",
+    "surface": "outer adventitial surface",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "0255415d028ca4c4d940f3391e56f23948d58b8fc3961ad8fca2499e9ec40240",
+    "applies_to": [
+      "esophagus"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy esophageal outer adventitia: restrained pale gray-pink fibrous connective tissue, very fine irregular collagen strands, sparse delicate reddish capillaries. No internal mucosal folds or luminal view. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "esophagus"
+  },
+  "adrenal_capsule": {
+    "file": "adrenal_capsule.png",
+    "surface": "adrenal capsule",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "21eec20a72919dd23f3c6c63ebfbba5b381ced179fdc2dcbece0aa7f11d8a149",
+    "applies_to": [
+      "adrenal_gland_left",
+      "adrenal_gland_right"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy adrenal external capsular surface: muted warm ochre-yellow with subtle pink-beige fibrous connective tissue, fine sparse capillaries, delicate soft mottling. No cut face or exposed internal cortex/medulla layers. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated."
+  },
+  "thyroid_gland": {
+    "file": "thyroid_gland.png",
+    "surface": "thyroid capsule",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "84f6e2f4f0ae4b5377289e0fc3e8b487f14c3939a0a52a58615b75544d0f2d1b",
+    "applies_to": [
+      "thyroid_gland"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy thyroid outer capsular surface: subdued dusky reddish brown and warm pink, fine delicate branching superficial capillaries, smooth thin translucent fibrous covering. No histology follicles or nodules. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "thyroid_gland"
+  },
+  "prostate": {
+    "file": "prostate.png",
+    "surface": "outer fibromuscular capsule",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "2f09414b9d91ef3af8859dfe2115a95e06290b9cdbf966111dd5fed2170c939b",
+    "applies_to": [
+      "prostate"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Generic healthy prostate external fibromuscular capsular tissue: muted pinkish taupe and pale gray beige, very fine compact interwoven collagen and muscle fibers, sparse tiny superficial vessels. No nodules, cut section, gland diagram or ducts. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "prostate"
+  },
+  "trachea": {
+    "file": "trachea.png",
+    "surface": "outer tracheal wall and perichondrium",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "ac3ca61bceb86b0008af876e2e5e28560b729f92c8c1b386521fd1714cfb5f66",
+    "applies_to": [
+      "trachea"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy outer tracheal wall/perichondrial tissue: pale warm ivory cartilage beneath a thin pinkish translucent fibrous covering with sparse fine capillaries. Only homogeneous microscopic-to-small surface variation. No large tracheal rings, ridges, airway lumen or mucosal cilia. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "trachea"
+  },
+  "brain": {
+    "file": "brain.png",
+    "surface": "pial surface over cerebral cortex",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "a14cc9c951e75759bc5f7912865320b7d55d0a0906aba20d5d803b258ae884ac",
+    "applies_to": [
+      "brain"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy pial surface over cerebral cortex: restrained pale gray-pink cortical color through an extremely thin translucent pia, fine sparse branching reddish capillaries. No large vessels, sulci, gyri, brain silhouette, exposed white matter or histology cells; macro folds come from mesh geometry, not the tile. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "brain"
+  },
+  "spinal_cord": {
+    "file": "spinal_cord.png",
+    "surface": "pial surface of spinal cord",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "8b5b4e7c3b9028a5a2fa62ff7570d34ae18969fdf4d2e2f06102d68e76d75ebd",
+    "applies_to": [
+      "spinal_cord"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy spinal cord exterior under thin pia: pale warm ivory and delicate gray-pink neural surface, fine sparse longitudinal capillaries and faint fine longitudinal fibrous variation. No whole cord, segments, nerve roots, transverse cut section or gray-matter butterfly. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "spinal_cord"
+  },
+  "renal_cyst_wall": {
+    "file": "renal_cyst_wall.png",
+    "surface": "generic renal cyst outer wall",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "a0a23856be5c72b74623bb1cf95f0ca3a693b69f6d5b98f3ba91ab60539fd70b",
+    "applies_to": [
+      "kidney_cyst_left",
+      "kidney_cyst_right"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Generic simple renal cyst external wall appearance for synthetic visualization: thin pearly whitish translucent connective membrane, very pale pink-beige undertone and sparse delicate superficial capillaries, smooth subtle fine fibrous variation. No contents, blood, calcification, nodules, disease claims or cyst/organ silhouette. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated."
+  },
+  "arterial_adventitia": {
+    "file": "arterial_adventitia.png",
+    "surface": "arterial adventitia",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "6c6fa59ef7c07927cb39e68d436e1d4f41825006f8053998b268b29ecc8c3ccb",
+    "applies_to": [
+      "brachiocephalic_trunk",
+      "subclavian_artery_left",
+      "subclavian_artery_right",
+      "common_carotid_artery_left",
+      "common_carotid_artery_right",
+      "iliac_artery_left",
+      "iliac_artery_right"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy medium/large artery external adventitial surface: pale ivory blush pink, fine densely interwoven collagen fibers with subtle longitudinal preference, sparse extremely fine vasa vasorum. No red lumen, blood, plaque, large branching vessel drawing or tubular shape. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated."
+  },
+  "venous_adventitia": {
+    "file": "venous_adventitia.png",
+    "surface": "venous outer wall and adventitia",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "70f507671c3bb5c7c8dd7e73337268bcd01034cc08806763dc43972b0fd2b590",
+    "applies_to": [
+      "pulmonary_vein",
+      "superior_vena_cava",
+      "inferior_vena_cava",
+      "brachiocephalic_vein_left",
+      "brachiocephalic_vein_right",
+      "iliac_vena_left",
+      "iliac_vena_right",
+      "portal_vein_and_splenic_vein"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Generic healthy venous exterior/adventitia: thin muted pale gray-mauve and pink-beige connective tissue, delicate fine irregular collagen fibers and sparse tiny superficial capillaries. Restrained natural color, not saturated blue. No lumen, blood, valves, large vessels or tubular shape. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated."
+  },
+  "intervertebral_discs": {
+    "file": "intervertebral_discs.png",
+    "surface": "outer annulus fibrosus",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "313bce97913b97a1f9bae8a4f9b5372e9162c2c0ae8b3e34c3a1a95b8d2c0a9b",
+    "applies_to": [
+      "intervertebral_discs"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy intervertebral disc external annulus fibrosus: warm pale ivory with very subtle gray-beige fine dense collagen fibers, alternating very fine oblique fiber directions, almost avascular appearance. No cut section, nucleus pulposus, concentric disc diagram, bone, cracks or gross ring-shaped structure. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "intervertebral_discs"
+  },
+  "costal_cartilages": {
+    "file": "costal_cartilages.png",
+    "surface": "costal cartilage perichondrium",
+    "creator": "OpenAI image generation, requested by the repository owner",
+    "source": "Synthetic tissue appearance tile generated with the built-in image_gen tool on 2026-11-25",
+    "changes": "Original generated PNG copied unchanged.",
+    "sha256": "8162410a06b14aefe3ba99507bf8532ceb305686daaa6eec23fc2230ae2464a5",
+    "applies_to": [
+      "costal_cartilages"
+    ],
+    "synthetic": true,
+    "prompt": "Use case: scientific-educational. Asset type: one square 1024 by 1024 tissue appearance conditioning tile for TRELLIS.2 texturing of an existing anatomy mesh. Generate exactly one full-frame continuous surface texture, not a collage. Healthy costal cartilage outer perichondrial surface: smooth pearly pale ivory with a very subtle cool bluish-gray undertone and extremely fine fibrous texture, nearly uniform with minimal vascular detail. No bone pores, trabecular network, cut section, rib silhouette or cartilage rings. Flat orthographic macro surface patch filling the entire square edge to edge. Uniform diffuse neutral illumination and minimal lighting gradients; this should read as base color/albedo, not a shaded object. Spatially homogeneous low-contrast fine detail and restrained natural palette. Make opposite edges visually compatible for tiling. No text, labels, watermark, border, margins, tools, organ silhouette, detached object, cut edges, perspective, deep folds, cast shadows or baked specular highlights. Opaque background. Synthetic educational appearance reference, not a patient photograph or diagnostic image.",
+    "limitations": "Generic appearance conditioning only, not a patient photograph or diagnostic reference. Physical scale and seamless repetition are not validated.",
+    "organ": "costal_cartilages"
   }
 }

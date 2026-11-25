@@ -470,9 +470,9 @@ def test_strong_cleanup_does_not_collapse_coarse_mesh():
 
 
 def test_packaged_texture_defaults():
+    from patient_digital_twin.anatomy import CATALOG
     from patient_digital_twin.references import default_texture_reference
-    for name in ('aorta', 'colon', 'liver', 'gallbladder', 'bladder',
-                 'left kidney', 'right kidney', 'pancreas', 'spleen', 'stomach'):
+    for name in (*CATALOG, 'bladder', 'left kidney', 'right kidney'):
         reference = default_texture_reference(name)
         reference.validate()
         assert reference.image.is_file()
@@ -524,9 +524,8 @@ def test_tissue_family_defaults_are_explicit_and_preserve_exact_overrides():
         with Image.open(reference.image) as image:
             assert image.width == image.height
     assert default_texture_reference('colon').metadata['selection']['default'] == 'colon'
-    for unsupported in ('brain', 'costal_cartilages', 'kidney_cyst_left', 'lung_fake'):
-        with pytest.raises(ValueError, match='No default texture'):
-            default_texture_reference(unsupported)
+    with pytest.raises(ValueError, match='No default texture'):
+        default_texture_reference('lung_fake')
     directory = default_texture_reference('heart').image.parent
     records = json.loads((directory / 'defaults.json').read_text())
     assigned = []
