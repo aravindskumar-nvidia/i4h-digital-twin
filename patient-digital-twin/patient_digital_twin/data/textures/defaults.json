@@ -25,7 +25,7 @@
     "organ": "liver",
     "surface": "capsule",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/liver_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file liver_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "0d257138dccf65397f1c3642a80187b466b4cae023d098908789eddca155a77d",
     "file": "liver.png"
@@ -34,7 +34,7 @@
     "organ": "gallbladder",
     "surface": "outer wall",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/gallbladder_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file gallbladder_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "ff1cb4bf44beb1aa73451032161411ccbea2cf91546f7b76a54c3b48265c8536",
     "file": "gallbladder.png"
@@ -43,7 +43,7 @@
     "organ": "urinary_bladder",
     "surface": "outer wall",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/bladder_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file bladder_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "84401bdb8678ce062469bcc8c26eb4883f968fe275d5f97f9083820ebbc72d66",
     "file": "urinary_bladder.png"
@@ -52,7 +52,7 @@
     "organ": "kidney_left",
     "surface": "capsule",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/left_kidney_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file left_kidney_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "d61effcc48c9f4afa5c3b739e15c77f2eb19f4b9dd86cb94ed07b5cb29ca7874",
     "file": "kidney_left.png"
@@ -61,7 +61,7 @@
     "organ": "kidney_right",
     "surface": "capsule",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/right_kidney_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file right_kidney_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "ab57313cab8307133c43d2e8c59b30104311ea5e0ecca9807e53e22cef178c90",
     "file": "kidney_right.png"
@@ -70,7 +70,7 @@
     "organ": "pancreas",
     "surface": "outer surface",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/pancreas_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file pancreas_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "284103f9879e5c9ee9684097519d8c9215454dd5a020788da6426ed116ebe4c9",
     "file": "pancreas.png"
@@ -79,7 +79,7 @@
     "organ": "spleen",
     "surface": "capsule",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/spleen_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file spleen_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "4f46968799bec58c5e56acf5d4b9dde5057ad7311541919a0659fd93f597361a",
     "file": "spleen.png"
@@ -88,7 +88,7 @@
     "organ": "stomach",
     "surface": "outer wall",
     "creator": "User-provided tissue tile collection",
-    "source": "/home/aravikumar/workspace/holoapplications/Pixal3DMed/first_tier_texturing_surface_squares/stomach_amos_001_surface_square.png",
+    "source": "User-provided tissue tile collection, original file stomach_amos_001_surface_square.png",
     "changes": "Copied unchanged for default texture conditioning.",
     "sha256": "d43fc3e13901316e44a34ef7ef8f140eadb5c7996ee953167dbfe0c656b799a2",
     "file": "stomach.png"
