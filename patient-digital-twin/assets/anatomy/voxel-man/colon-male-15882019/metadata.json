@@ -86,7 +86,11 @@
   "preparation": {
     "kind": "voxel-man-labels",
     "url": "https://zenodo.org/api/records/15882019/files/VOXEL-MAN_segmented-internal-organs.zip/content",
+    "alternate_urls": [
+      "https://zenodo.org/records/15882019/files/VOXEL-MAN_segmented-internal-organs.zip?download=1"
+    ],
     "checksum": "md5:dbdfada24e69591bdf9650453918d9ef",
+    "size_bytes": 395086431,
     "label_directory": "VOXEL-MAN_segmented-internal-organs/labels",
     "first_slice": 1256,
     "slice_count": 774

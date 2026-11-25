@@ -36,6 +36,7 @@ def test_agent_texture_and_cleanup_settings(tmp_path, monkeypatch):
         '--texture-timeout', '900', '--missing-texture', 'retain',
         '--texture-size', '1024', '--texture-steps', '8', '--no-match-reference-color',
         '--smoothing-iterations', '40', '--workspace', str(tmp_path / 'work'),
+        '--min-component-area-mm2', '30', '--max-component-distance-mm', '40',
     ])
     assert run.agent.model == 'gpt-6.1-terra'
     assert run.agent.timeout_s == 900 and run.agent.token_budget == 100000
@@ -45,6 +46,7 @@ def test_agent_texture_and_cleanup_settings(tmp_path, monkeypatch):
     assert run.texture_options.match_reference_color is False
     assert run.default_textures and run.missing_texture == 'retain'
     assert run.cleanup.smoothing_iterations == 40
+    assert run.cleanup.min_component_area_mm2 == 30 and run.cleanup.max_component_distance_mm == 40
     assert run.workspace == tmp_path / 'work'
 
 

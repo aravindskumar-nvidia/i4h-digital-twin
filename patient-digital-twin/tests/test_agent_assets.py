@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Verify final artifacts; optionally exercise actual Blender import/export."""
+import asyncio
 import os
 import subprocess
 from contextlib import nullcontext
@@ -199,6 +200,56 @@ export_asset({str(work)!r})
     assert UsdGeom.PrimvarsAPI(prim).GetPrimvar('st').HasValue()
     textures = [a.Get() for p in stage.Traverse() for a in p.GetAttributes() if a.GetTypeName() == Sdf.ValueTypeNames.Asset and a.Get()]
     assert textures and all(Path(t.resolvedPath).is_file() for t in textures)
+
+
+def test_real_filtered_reference_survives_idle(asset, monkeypatch):
+    """Opt-in regression for deleted HRA IDs retained in a render dependency graph."""
+    blender = os.environ.get('I4H_TEST_BLENDER')
+    reference = os.environ.get('I4H_TEST_REFERENCE_IDLE')
+    if not blender or not reference:
+        pytest.skip('Set I4H_TEST_BLENDER and I4H_TEST_REFERENCE_IDLE to HRA aorta metadata (75s idle check)')
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+    from patient_digital_twin.agent.runtime import blender_session
+    from patient_digital_twin.refinement import prepare_references
+
+    _, work = asset
+    prepare_references(work, {'aorta': Path(reference).resolve()}, include_major_branches=True)
+    monkeypatch.setenv('BLENDER_EXECUTABLE', blender)
+    capture = """import bpy
+for scene in bpy.data.scenes:
+    if not (scene.get('i4h_session') or scene.get('i4h_reference')):
+        continue
+    camera = next((o for o in scene.objects if o.type == 'CAMERA'), None)
+    if camera is None:
+        camera = bpy.data.objects.new('capture', bpy.data.cameras.new('capture'))
+        scene.collection.objects.link(camera)
+    camera.location = (0, -2, 0)
+    camera.rotation_euler = (1.5707963, 0, 0)
+    camera.data.type = 'ORTHO'
+    camera.data.ortho_scale = 3
+    scene.camera = camera
+    scene.render.resolution_x = scene.render.resolution_y = 128
+    scene.render.resolution_percentage = 100
+    bpy.ops.render.render(scene=scene.name)
+    scene.camera = None
+"""
+
+    async def inspect(config):
+        await cli.blender_call(config, 'open_asset', work)
+        async with stdio_client(StdioServerParameters(**config)) as (read, write):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                for delay in (0, 75):
+                    await asyncio.sleep(delay)
+                    result = await client.call_tool('execute_blender_code', {'code': capture})
+                    assert not result.isError
+                    assert not any(c.type == 'text' and c.text.startswith('Error') for c in result.content)
+                    result = await client.call_tool('look', {'image': 'Render Result', 'max_size': 256})
+                    assert not result.isError and any(c.type == 'image' for c in result.content)
+
+    with blender_session(work, cli.mcp_config(), 'virtual') as config:
+        asyncio.run(inspect(config))
 
 
 @pytest.mark.parametrize('selection', ['saved', 'single', 'ambiguous'])

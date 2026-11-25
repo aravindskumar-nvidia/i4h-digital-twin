@@ -47,6 +47,84 @@ def test_cleanup_is_independent_and_does_not_mutate(body):
     assert result.mesh is not mesh
 
 
+@pytest.fixture
+def fragmented_surface():
+    import trimesh
+
+    pieces = []
+    for size, x in [(.04, 0), (.01, .03), (.008, .085), (.001, .024), (.012, .25)]:
+        part = trimesh.creation.box(extents=[size] * 3)
+        part.apply_translation([x, 0, 0])
+        pieces.append(part)
+    surface = trimesh.util.concatenate(pieces)
+    return MeshGeometry(surface.vertices.copy(), surface.faces.copy())
+
+
+@pytest.mark.parametrize('filtering', [True, False])
+def test_cleanup_filters_tiny_and_distant_islands_but_keeps_nearby_chains(
+    fragmented_surface, filtering,
+):
+    import trimesh
+
+    options = CleanupOptions() if filtering else CleanupOptions(min_component_area_mm2=0, max_component_distance_mm=0)
+    result = prepare_surface(fragmented_surface, options)
+    assert result.measurements['after']['components'] == (3 if filtering else 5)
+    records = result.measurements['component_filter']['components']
+    assert records[0]['decision'] == 'keep_primary'
+    if filtering:
+        assert [r['decision'] for r in records].count('remove_small') == 1
+        assert [r['decision'] for r in records].count('remove_distant') == 1
+        assert [r['decision'] for r in records].count('retain_nearby') == 2
+        assert sorted(round(r['gap_mm']) for r in records if r['decision'] == 'retain_nearby') == [5, 46]
+        parts = trimesh.Trimesh(result.mesh.vertices, result.mesh.faces, process=False).split(only_watertight=False)
+        assert sorted(abs(part.volume) for part in parts) == pytest.approx(
+            sorted([.04 ** 3, .01 ** 3, .008 ** 3]), rel=.02)
+
+
+def test_cleanup_uses_surface_gap_and_preserves_small_primary():
+    import trimesh
+
+    large = trimesh.creation.box(extents=[.4, .3, .3])
+    near_face = trimesh.creation.box(extents=[.01] * 3)
+    near_face.apply_translation([.21, 0, 0])
+    surface = trimesh.util.concatenate([large, near_face])
+    result = prepare_surface(MeshGeometry(surface.vertices, surface.faces),
+                             CleanupOptions(smoothing_iterations=0, hole_radius_mm=0))
+    assert result.measurements['after']['components'] == 2
+    fragment = result.measurements['component_filter']['components'][1]
+    assert fragment['decision'] == 'retain_nearby'
+    assert fragment['gap_mm'] == pytest.approx(5)
+    small = trimesh.creation.box(extents=[.001] * 3)
+    result = prepare_surface(MeshGeometry(small.vertices, small.faces),
+                             CleanupOptions(smoothing_iterations=0, hole_radius_mm=0))
+    assert result.measurements['after']['components'] == 1
+
+
+def test_cleanup_history_reaches_immediate_and_later_agents(body, fragmented_surface, tmp_path, monkeypatch):
+    import shutil
+    from patient_digital_twin.agent.assets import prepare
+
+    body.anatomy.structures['liver'].mesh = fragmented_surface
+    captures = []
+    def edit(args, workspace, settings, output):
+        captures.append(settings['cleanup_components'])
+        output.mkdir()
+        shutil.copy2(workspace / 'input.usdc', output / 'input.usdc')
+    monkeypatch.setattr(agent_cli, '_run_blender', edit)
+    result = PatientWorkflow(
+        cleanup=CleanupOptions(smoothing_iterations=0, hole_radius_mm=0),
+        agent=AgentOptions(task='refine', targets=('liver',)),
+    ).run(body, tmp_path / 'bundle', format='bundle')
+    assert len(captures) == 1
+    records = captures[0]['liver']['components']
+    assert sum(r['decision'] == 'retain_nearby' for r in records) == 2
+    later = prepare(result, tmp_path / 'later-agent')
+    assert later['cleanup_components'] == captures[0]
+    for filename in ['human_body.usdc', 'patient_anatomy.usdc']:
+        stage = Usd.Stage.Open(str(result.parent / filename))
+        assert json.loads(stage.GetPrimAtPath('/HumanBody').GetAttribute('cleanup:components').Get()) == captures[0]
+
+
 @pytest.mark.parametrize('format', ['usd', 'bundle'])
 def test_default_workflow_never_starts_agent(body, tmp_path, monkeypatch, format):
     def unexpected(*args, **kwargs):

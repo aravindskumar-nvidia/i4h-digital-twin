@@ -15,7 +15,7 @@ from .workflow import PatientWorkflow
 # None distinguishes an omitted flag from a request for the refinement path.
 _FIELDS = {
     'cleanup': None, 'smoothing_iterations': None, 'smoothing_pass_band': None,
-    'hole_radius_mm': None, 'min_component_area_mm2': None,
+    'hole_radius_mm': None, 'min_component_area_mm2': None, 'max_component_distance_mm': None,
     'agent_task': None, 'agent_target': None,
     'agent_prompt': None, 'agent_backend': None, 'agent_model': None,
     'agent_timeout': None, 'token_budget': None, 'budget_usd': None,
@@ -33,8 +33,12 @@ def add_refinement_arguments(parser: argparse.ArgumentParser) -> None:
     cleanup = parser.add_argument_group('Surface cleanup (enabled when refinement is requested)')
     cleanup.add_argument('--cleanup', action=argparse.BooleanOptionalAction, default=None)
     for flag, kind in [('smoothing-iterations', int), ('smoothing-pass-band', float),
-                       ('hole-radius-mm', float), ('min-component-area-mm2', float)]:
+                       ('hole-radius-mm', float)]:
         cleanup.add_argument('--' + flag, type=kind)
+    cleanup.add_argument('--min-component-area-mm2', type=float,
+                         help='Minimum secondary-fragment surface area (default: 25 mm^2; 0 disables)')
+    cleanup.add_argument('--max-component-distance-mm', type=float,
+                         help='Maximum surface gap for retaining a fragment (default: 50 mm; 0 disables)')
     agent = parser.add_argument_group('Optional SDK agent editing')
     from .agent.prompts import TASKS
     agent.add_argument('--agent-task', choices=TASKS, help='Named operation; no verbal prompt required')
@@ -91,11 +95,12 @@ def pop_refinement_workflow(options: dict) -> PatientWorkflow | None:
         }
     if values['agent_task'] == 'texture' and (values['cleanup'] is True or
             any(values[key] is not None for key in ('smoothing_iterations', 'smoothing_pass_band',
-                                                  'hole_radius_mm', 'min_component_area_mm2'))):
+                                                  'hole_radius_mm', 'min_component_area_mm2',
+                                                  'max_component_distance_mm'))):
         raise ValueError('Texture-only edits cannot request geometry cleanup')
     cleanup_values = {key: values[key] for key in
                       ('smoothing_iterations', 'smoothing_pass_band', 'hole_radius_mm',
-                       'min_component_area_mm2') if values[key] is not None}
+                       'min_component_area_mm2', 'max_component_distance_mm') if values[key] is not None}
     if values['cleanup'] is False and cleanup_values:
         raise ValueError('--no-cleanup cannot be combined with cleanup settings')
     runtime = None

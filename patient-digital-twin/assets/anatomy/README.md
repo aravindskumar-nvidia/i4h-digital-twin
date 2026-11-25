@@ -37,6 +37,8 @@ A first VOXEL-MAN request downloads approximately 395 MB. Both organs reuse that
 archive. Generated assets are keyed by recipe, selected labels, and converter
 versions. Completed cache entries work offline and are checksum-verified on reuse.
 Partial downloads and conversions are never treated as complete.
+Downloads retry transient failures up to three times and validate byte ranges
+and the pinned checksum before caching.
 
 Existing local metadata-plus-GLB assets remain supported. Copied editing workspaces
 and derived outputs retain attribution and source provenance.

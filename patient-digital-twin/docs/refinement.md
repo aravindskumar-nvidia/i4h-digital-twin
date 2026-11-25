@@ -18,6 +18,15 @@ including when working with an already textured mesh. Other omitted operations
 are skipped. The input `HumanBody` is copied for the run. Failed runs
 retain their intermediate assets under the workspace.
 
+Cleanup keeps the largest component and removes secondary fragments below
+25 mm² or beyond a 50 mm surface gap from the main component or another retained
+fragment. Nearby pieces stay separate and are smoothed independently for agent
+review. These are geometric cutoffs, not anatomical judgments. Tune them with
+`--min-component-area-mm2` and `--max-component-distance-mm`; zero disables each
+filter. Decisions are recorded in `workflow.json` and the USD's
+`/HumanBody.cleanup:components` attribute, which follows the asset into later
+agent sessions. Plain exports without cleanup retain their previous behavior.
+
 ## Named agent operations
 
 Use `--agent-task` for routine edits. No verbal prompt is required.
@@ -230,7 +239,7 @@ python -m patient_digital_twin \
 - `--no-default-textures`: use only explicit tiles.
 - `--missing-texture error`: stop when a structure has no default tile; retaining its material is the default.
 - `--smoothing-iterations`, `--smoothing-pass-band`, `--hole-radius-mm`, and
-  `--min-component-area-mm2`: control cleanup.
+  `--min-component-area-mm2` / `--max-component-distance-mm`: control cleanup.
 - `--texture-seed`, `--texture-resolution`, `--texture-size`, `--texture-steps`,
   `--texture-roughness`, and `--no-match-reference-color`: control texture generation.
 - `--workspace`: select where intermediate assets and recovery files are retained.

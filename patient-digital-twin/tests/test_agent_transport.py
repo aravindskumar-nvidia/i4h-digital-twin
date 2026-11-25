@@ -69,7 +69,7 @@ def test_codex_streams_actual_sdk_notification_shape(monkeypatch, tmp_path, caps
     assert 'mcp_servers.blender.tools.look.approval_mode="approve"' in captured['config'].config_overrides
     assert 'features.rollout_budget.enabled=true' in captured['config'].config_overrides
     assert 'features.rollout_budget.limit_tokens=1000' in captured['config'].config_overrides
-    assert 'features.rollout_budget.reminder_at_remaining_tokens=[]' in captured['config'].config_overrides
+    assert 'features.rollout_budget.reminder_at_remaining_tokens=[500, 250, 100]' in captured['config'].config_overrides
     assert not any('default_tools_approval_mode' in item for item in captured['config'].config_overrides)
 
 

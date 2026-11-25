@@ -34,6 +34,22 @@ Omitted transforms are identity. Install `trimesh` for STL/OBJ imports.
 See `python examples/pipeline.py --help` for all arguments and the
 [optional model setup](../README.md#start-from-ct-or-generate-a-patient).
 
+## Fast saved renders (Blender)
+
+With the `editing` environment and Blender 5.0+ prepared, run from the repository root:
+
+```bash
+python patient-digital-twin/examples/render.py /path/to/patient.usdc --output output/preview.png
+
+python patient-digital-twin/examples/render.py /path/to/before.usdc /path/to/after.usdc \
+  --output output/comparison
+```
+
+One input saves a PNG; two save only `comparison.png`, using shared framing in one
+background Blender process. Reruns replace that image. Eevee shows materials and
+textures; `--engine workbench` gives faster geometry previews. CT and exterior skin
+are excluded. Compare two standalone stages or two bundle anatomy stages.
+
 ## Isaac Sim viewer
 
 Export the supplied aorta and liver with matching CT, then open the stage using

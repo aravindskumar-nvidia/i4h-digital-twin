@@ -40,6 +40,9 @@ Do not change scene units. Leave Object Mode active when finished. Do not export
 or modify source files: the application validates and publishes the result.
 Before finishing, run the supplied check_asset command through execute_blender_code.
 Fix any reported scene errors and check again before finishing.
+Use the available budget for bounded edits, not repeated inspection of unchanged views.
+When budget reminders arrive, reserve the final quarter for required comparison images,
+reports and check_asset. Report unresolved work honestly; do not relax validation to finish.
 """
 
 
@@ -141,10 +144,11 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
     """Stream the Codex Python SDK; credentials/config remain owned by Codex."""
     from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
+    reminders = sorted({max(1, token_budget // divisor) for divisor in (2, 4, 10)}, reverse=True)
     overrides = (
         'features.rollout_budget.enabled=true',
         f'features.rollout_budget.limit_tokens={token_budget}',
-        'features.rollout_budget.reminder_at_remaining_tokens=[]',
+        f'features.rollout_budget.reminder_at_remaining_tokens={json.dumps(reminders)}',
         'features.rollout_budget.prefill_token_weight=1.0',
         'features.rollout_budget.sampling_token_weight=1.0',
         f'mcp_servers.blender.command={json.dumps(config["command"])}',
@@ -255,6 +259,16 @@ def _run_blender(args: argparse.Namespace, workspace: Path, settings: dict, outp
             prompt = (f"Edit the active I4H scene (session {settings['token']}).\n{args.prompt}\n"
                       f"Scene check: exec(compile(open({worker!r}).read(), {worker!r}, 'exec')); "
                       f"check_asset({str(workspace)!r})")
+            if settings.get('cleanup_components'):
+                prompt += (f"\nCleanup fragment history is in {str(workspace / 'edit.json')!r}, "
+                           "under cleanup_components. Review it before editing. Cleanup removed tiny/distant "
+                           "secondary islands and retained nearby fragments as separate geometry. Bounds are "
+                           "in original structure-local millimeters; component IDs describe the pre-cleanup "
+                           "mesh, not current vertex indices. Inspect the current mesh to identify surviving "
+                           "pieces. Proximity is evidence for review, not proof of a connection. Preserve "
+                           "meaningful nearby fragments; connect them only when the selected operation, "
+                           "patient geometry and references support it. Refinement and texture tasks must "
+                           "not change connectivity.\n")
             if args.backend == 'claude':
                 run_claude(prompt, workspace, config, args.model, args.max_turns or 30,
                            args.budget_usd or 5, args.timeout, publish=publish, max_repairs=args.max_repairs)

@@ -152,6 +152,7 @@ class PatientWorkflow:
                 edited = published if published.is_file() else resume_asset(run / 'agent', run / 'edited', self.agent)
             else:
                 source = body.export_to_usd(run / 'input.usdc')
+                _annotate_cleanup(source, report['cleanup'])
                 edited = edit_asset(source, run / 'edited', self.agent, workspace=run / 'agent')
             state.update(edited=str(edited), stage='textures')
             write_state(state_path, state)
@@ -191,6 +192,9 @@ class PatientWorkflow:
             provenance = edited.parent / 'refinement'
             if provenance.exists():
                 shutil.copytree(provenance, package / 'refinement')
+        _annotate_cleanup(anatomy, report['cleanup'])
+        if format == 'bundle':
+            _annotate_cleanup(companion, report['cleanup'])
         (package / 'workflow.json').write_text(json.dumps(report, indent=2) + '\n')
         published_result = _publish_package(package, output, result_name, format)
         state.update(stage='complete', result=str(published_result))
@@ -247,6 +251,19 @@ class PatientWorkflow:
             workspace=run.parent)
         return workflow.run(load_body(run / 'body'), output or state['output'],
                             **state['export'], _resume_run=run)
+
+
+def _annotate_cleanup(path, cleanup):
+    """Carry fragment decisions into both immediate and later agent handoffs."""
+    inventory = {name: item['component_filter'] for name, item in cleanup.items() if 'component_filter' in item}
+    if not inventory:
+        return
+    from pxr import Sdf, Usd
+
+    stage = Usd.Stage.Open(str(path))
+    stage.GetPrimAtPath('/HumanBody').CreateAttribute('cleanup:components', Sdf.ValueTypeNames.String).Set(
+        json.dumps(inventory))
+    stage.GetRootLayer().Save()
 
 
 def _restore_topology(body, original_graphs, requested, spacing_mm):

@@ -73,6 +73,9 @@ def prepare(source: Path, workspace: Path, *, vessel_names: list[str] | None = N
         raise ValueError('The asset has no meshes')
     settings = dict(source=str(source), usd=str(usd), manifest=manifest, paths=paths,
                     token=uuid4().hex, vessel_names=vessel_names)
+    inventory = stage.GetPrimAtPath('/HumanBody').GetAttribute('cleanup:components')
+    if inventory and inventory.Get():
+        settings['cleanup_components'] = json.loads(inventory.Get())
     (workspace / 'edit.json').write_text(json.dumps(settings))
     handoff = Usd.Stage.Open(str(workspace / 'original.usdc'))
     handoff.RemovePrim('/HumanBody/Imaging')

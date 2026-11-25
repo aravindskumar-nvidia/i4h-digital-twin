@@ -65,6 +65,10 @@ def open_asset(directory):
         for obj in list(reference_scene.objects):
             if obj not in keep:
                 bpy.data.objects.remove(obj, do_unlink=True)
+        # Import builds an evaluated view layer containing the entire reference.
+        # Flush removed IDs while this scene is active: leaving its stale graph
+        # behind can later dereference a deleted object's runtime during capture.
+        bpy.context.view_layer.update()
         reference_scene['i4h_reference'] = organ
     bpy.context.window.scene = scene
     bpy.context.view_layer.update()

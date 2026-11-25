@@ -4,16 +4,56 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
+import logging
 import os
 import re
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
+_RANGE_CHUNK_BYTES = 8 * 1024 * 1024
+
+
+def _download_ranges(url: str, destination: Path, size: int) -> None:
+    """Fetch a known-size archive in bounded ranges without buffering it in memory."""
+    with destination.open('wb') as stream:
+        stream.truncate(size)
+
+    def fetch(start: int) -> None:
+        end = min(start + _RANGE_CHUNK_BYTES, size) - 1
+        request = urllib.request.Request(url, headers={
+            'User-Agent': 'i4h-digital-twin', 'Range': f'bytes={start}-{end}',
+            'Accept-Encoding': 'identity',
+        })
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status != 206 or response.headers.get('Content-Range') != f'bytes {start}-{end}/{size}':
+                raise ValueError(f'Reference source returned an unexpected byte range: {url}')
+            # Separate descriptors give concurrent writes independent file offsets.
+            with destination.open('r+b') as stream:
+                stream.seek(start)
+                remaining = end - start + 1
+                while remaining:
+                    chunk = response.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise http.client.IncompleteRead(b'', remaining)
+                    stream.write(chunk)
+                    remaining -= len(chunk)
+
+    workers = ThreadPoolExecutor(max_workers=4)
+    try:
+        list(workers.map(fetch, range(0, size, _RANGE_CHUNK_BYTES)))
+    finally:
+        workers.shutdown(wait=True, cancel_futures=True)
 
 
 def _checksum(path: Path, algorithm: str = 'sha256') -> str:
@@ -28,27 +68,49 @@ def _download(source: dict, cache: Path, suffix: str) -> Path:
     algorithm, expected = source['checksum'].split(':', 1)
     if algorithm not in {'sha256', 'md5'} or not re.fullmatch(r'[0-9a-f]+', expected):
         raise ValueError('Reference download requires a supported pinned checksum')
+    size = source.get('size_bytes')
+    if size is not None and (type(size) is not int or size <= 0):
+        raise ValueError('Reference download size_bytes must be a positive integer')
     destination = cache / 'downloads' / (algorithm + '-' + expected + suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_file():
         if _checksum(destination, algorithm) != expected:
             raise ValueError(f'Cached reference checksum mismatch: {destination}')
         return destination
-    temporary = None
-    try:
-        request = urllib.request.Request(source['url'], headers={'User-Agent': 'i4h-digital-twin'})
-        with urllib.request.urlopen(request, timeout=120) as response:
-            with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
-                temporary = Path(stream.name)
-                for chunk in iter(lambda: response.read(1024 * 1024), b''):
-                    stream.write(chunk)
-        if _checksum(temporary, algorithm) != expected:
-            raise ValueError(f'Downloaded reference checksum mismatch: {source["url"]}')
-        os.replace(temporary, destination)
-        return destination
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    urls = [source['url'], *source.get('alternate_urls', [])]
+    for attempt in range(3):
+        temporary = None
+        url = urls[attempt % len(urls)]
+        try:
+            if size is not None:
+                with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
+                    temporary = Path(stream.name)
+                _download_ranges(url, temporary, size)
+            else:
+                request = urllib.request.Request(url, headers={'User-Agent': 'i4h-digital-twin'})
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
+                        temporary = Path(stream.name)
+                        for chunk in iter(lambda: response.read(1024 * 1024), b''):
+                            stream.write(chunk)
+            if _checksum(temporary, algorithm) != expected:
+                raise ValueError(f'Downloaded reference checksum mismatch: {url}')
+            os.replace(temporary, destination)
+            return destination
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code not in {408, 429, 500, 502, 503, 504}:
+                raise
+            if attempt == 2:
+                raise RuntimeError(
+                    f'Reference download failed after 3 attempts: {source["url"]}. '
+                    'Retry later; the source service or network is unavailable.'
+                ) from error
+            logger.warning('Reference download attempt %d/3 failed (%s); retrying', attempt + 1, error)
+            time.sleep(2 ** attempt)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    raise AssertionError('Unreachable download state')
 
 
 def materialize(metadata: dict, directory: Path, cache: Path | None = None) -> tuple[Path, dict]:
@@ -70,7 +132,10 @@ def materialize(metadata: dict, directory: Path, cache: Path | None = None) -> t
     if kind != 'voxel-man-labels':
         raise ValueError(f'Unsupported reference preparation: {kind}')
     labels = json.loads((directory / metadata['structures']).read_text())
-    identity = dict(recipe=recipe, extraction=metadata['extraction'], labels=labels,
+    # Transport alternatives do not change extraction or invalidate prepared assets.
+    identity = dict(recipe={key: value for key, value in recipe.items()
+                            if key not in {'alternate_urls', 'size_bytes'}},
+                    extraction=metadata['extraction'], labels=labels,
                     anatomy=metadata['anatomy'], converter_version=1,
                     libraries={name: version(name) for name in ('numpy', 'scipy', 'scikit-image', 'trimesh', 'Pillow')})
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()

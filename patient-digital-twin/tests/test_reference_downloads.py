@@ -4,6 +4,7 @@
 import hashlib
 import io
 import json
+import urllib.error
 import zipfile
 
 import numpy as np
@@ -43,6 +44,58 @@ def test_interrupted_download_is_retryable(tmp_path, monkeypatch):
     assert not list((tmp_path / 'downloads').iterdir())
 
 
+@pytest.mark.parametrize('recover', [True, False])
+def test_transient_download_retries_alternate_pinned_source(tmp_path, monkeypatch, recover):
+    data = b'verified reference archive'
+    source = {'url': 'https://example.org/api/content',
+              'alternate_urls': ['https://example.org/files/reference.zip'],
+              'checksum': 'sha256:' + hashlib.sha256(data).hexdigest()}
+    calls = []
+    def download(request, **kwargs):
+        calls.append(request.full_url)
+        if recover and len(calls) == 2:
+            return io.BytesIO(data)
+        raise urllib.error.HTTPError(request.full_url, 504, 'Gateway Time-out', {}, None)
+    monkeypatch.setattr(assets.urllib.request, 'urlopen', download)
+    monkeypatch.setattr(assets.time, 'sleep', lambda _: None)
+    if recover:
+        result = assets._download(source, tmp_path, '.zip')
+        assert result.read_bytes() == data
+        assert calls == [source['url'], *source['alternate_urls']]
+    else:
+        with pytest.raises(RuntimeError, match='after 3 attempts'):
+            assets._download(source, tmp_path, '.zip')
+        assert len(calls) == 3
+        assert not list((tmp_path / 'downloads').iterdir())
+
+
+@pytest.mark.parametrize('wrong_range', [False, True])
+def test_known_size_archive_ranges_are_validated_and_reassembled(tmp_path, monkeypatch, wrong_range):
+    data = b'archive split across several ranges'
+    source = {'url': 'https://example.org/source.zip', 'size_bytes': len(data),
+              'checksum': 'sha256:' + hashlib.sha256(data).hexdigest()}
+    calls = []
+    class Response(io.BytesIO):
+        status = 206
+    def download(request, **kwargs):
+        start, end = map(int, request.get_header('Range').removeprefix('bytes=').split('-'))
+        calls.append((start, end))
+        response = Response(data[start:end + 1])
+        response.headers = {'Content-Range': 'bytes 0-0/1' if wrong_range
+                            else f'bytes {start}-{end}/{len(data)}'}
+        return response
+    monkeypatch.setattr(assets, '_RANGE_CHUNK_BYTES', 4)
+    monkeypatch.setattr(assets.urllib.request, 'urlopen', download)
+    if wrong_range:
+        with pytest.raises(ValueError, match='unexpected byte range'):
+            assets._download(source, tmp_path, '.zip')
+        assert not list((tmp_path / 'downloads').iterdir())
+    else:
+        result = assets._download(source, tmp_path, '.zip')
+        assert result.read_bytes() == data
+        assert sorted(calls) == [(i, min(i + 4, len(data)) - 1) for i in range(0, len(data), 4)]
+
+
 def test_label_recipe_conversion_and_cache(tmp_path, monkeypatch):
     import trimesh
 
@@ -75,5 +128,7 @@ def test_label_recipe_conversion_and_cache(tmp_path, monkeypatch):
         pytest.fail('Completed reference was downloaded or converted again')
     monkeypatch.setattr(assets, '_convert_labels', unexpected)
     monkeypatch.setattr(assets.urllib.request, 'urlopen', unexpected)
+    metadata['preparation']['alternate_urls'] = ['https://example.org/alternate.zip']
+    metadata['preparation']['size_bytes'] = len(data)
     assert assets.materialize(metadata, tmp_path, tmp_path / 'cache')[0] == model
     assert not (tmp_path / 'reference.glb').exists()
