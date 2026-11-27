@@ -30,19 +30,14 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from .anatomy import AnatomicalStructure, AnatomyCollection, Kind, is_vessel
-from .geometry import CenterlineGraph, extract_centerlines, rigid_transform
+from .export import SKIN_OPACITY, export_patient_twin, export_to_usd
+from .geometry import (
+    CENTERLINE_SPACING_M,
+    CenterlineGraph,
+    mesh_centerline,
+    rigid_transform,
+)
 from .scan_volume import ScanVolume, from_array
-
-
-def _extract_mesh_centerline(
-    vertices: np.ndarray, faces: np.ndarray, spacing_m: float = 0.0015
-) -> CenterlineGraph:
-    origin = vertices.min(0) - 2 * spacing_m
-    shape = np.ceil((vertices.max(0) - origin) / spacing_m).astype(int) + 3
-    return extract_centerlines(
-        vertices, faces, shape_zyx=(int(shape[2]), int(shape[1]), int(shape[0])),
-        spacing_zyx_m=(spacing_m,) * 3, origin_xyz_m=origin,
-    )
 
 
 @dataclass(frozen=True)
@@ -97,7 +92,7 @@ class HumanBody:
         """
         registration = self.anatomy.body_to_imaging if body_to_imaging is None else body_to_imaging
         if registration is None:
-            raise ValueError("attach_imaging requires body_to_imaging registration")
+            raise ValueError("Attaching imaging requires a body_to_imaging registration")
         if not isinstance(scan, ScanVolume):
             raise TypeError("attach_scan expects a ScanVolume")
         matrix = rigid_transform(registration)
@@ -133,10 +128,8 @@ class HumanBody:
         """Write anatomy (current pose), stored centerlines, and attached CT to one USD file.
 
         ``path`` must end in .usd, .usda, or .usdc; an existing file is replaced. Requires
-        ``usd-core``. Returns the resolved path. See ``export.export_to_usd``.
+        the ``usd`` extra. Returns the resolved path. See ``export.export_to_usd``.
         """
-        from .export import export_to_usd
-
         return export_to_usd(self, path)
 
     def export_patient_twin(
@@ -147,7 +140,7 @@ class HumanBody:
         vessel_names: Iterable[str] = (),
         world_from_patient_m: ArrayLike | None = None,
         ct_exterior: bool = False,
-        skin_opacity: float = 0.15,
+        skin_opacity: float = SKIN_OPACITY,
     ) -> Path:
         """Write a new schema-2 bundle directory for i4h-workflows; returns its ``patient_twin.yaml``.
 
@@ -162,15 +155,13 @@ class HumanBody:
         Example:
             ``body.export_patient_twin("bundle", vessel_names=["aorta"], ct_exterior=True)``
         """
-        from .export import export_patient_twin
-
         return export_patient_twin(
             self, output, patient_id=patient_id, vessel_names=tuple(vessel_names),
             world_from_patient_m=world_from_patient_m, ct_exterior=ct_exterior, skin_opacity=skin_opacity,
         )
 
     def extract_topology(
-        self, *, names: Iterable[str] | None = None, spacing_m: float = 0.0015
+        self, *, names: Iterable[str] | None = None, spacing_m: float = CENTERLINE_SPACING_M
     ) -> dict[str, CenterlineGraph]:
         """Compute and store centerlines for vessel and airway meshes (including disabled ones).
 
@@ -180,7 +171,8 @@ class HumanBody:
 
         Returns:
             ``{name: CenterlineGraph}`` in each mesh's local frame, also stored on
-            ``structure.centerline``. Nothing is stored unless every extraction succeeds.
+            ``structure.centerline``. Nothing is stored unless every extraction succeeds;
+            a failed extraction raises ``ValueError`` naming the structure.
 
         Example:
             ``body.extract_topology(names=["aorta"], spacing_m=0.0015)["aorta"].points``
@@ -197,11 +189,9 @@ class HumanBody:
             if name not in selected or not tubular or vertices is None or faces is None:
                 continue
             try:
-                results[name] = _extract_mesh_centerline(vertices, faces, spacing_m=spacing_m)
-            except ImportError:
-                raise
-            except Exception as exc:
-                raise RuntimeError(f"Centerline extraction failed for {name}: {exc}") from exc
+                results[name] = mesh_centerline(vertices, faces, spacing_m)
+            except ValueError as exc:
+                raise ValueError(f"Centerline extraction failed for {name}: {exc}") from exc
         for name, graph in results.items():
             self.anatomy.structures[name].centerline = graph
         return results

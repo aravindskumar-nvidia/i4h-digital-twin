@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Edit exported patient meshes/materials without round-tripping CT through Blender."""
+"""Hand patient USD to Blender and merge the edits back, without round-tripping CT.
+
+Every function here needs OpenUSD (the ``usd`` extra). Modules on the package's import
+path import this one only when they handle an edited asset.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -11,18 +15,25 @@ from uuid import uuid4
 
 import numpy as np
 import yaml
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, Vt
 
-from ..anatomy import Kind, is_vessel
-from ..body import _extract_mesh_centerline
+from ..anatomy import Kind, MeshGeometry, is_vessel
+from ..body import HumanBody
 from ..export import _publish
 from ..geometry import (
+    CenterlineGraph,
     centerline_spacing,
+    mesh_centerline,
     native_centerline,
     transform_points,
     validate_triangles,
     voxelize_mesh,
 )
 from ..scan_volume import load_artifact
+from .completion import publish_provenance, validate_completion
+
+# Cleanup decisions travel with the USD so later agent sessions can review them.
+CLEANUP_ATTRIBUTE = 'cleanup:components'
 
 
 class AssetValidationError(ValueError):
@@ -51,8 +62,6 @@ def _navigation_vessels(manifest, names):
 
 def prepare(source: Path, workspace: Path, *, vessel_names: list[str] | None = None) -> dict:
     """Snapshot a standalone USD or schema-2 bundle; hand only scene content to Blender."""
-    from pxr import Sdf, Usd, UsdGeom
-
     source = source.expanduser().resolve()
     if source.is_dir():
         source /= 'patient_twin.yaml'
@@ -73,7 +82,7 @@ def prepare(source: Path, workspace: Path, *, vessel_names: list[str] | None = N
         raise ValueError('The asset has no meshes')
     settings = dict(source=str(source), usd=str(usd), manifest=manifest, paths=paths,
                     token=uuid4().hex, vessel_names=vessel_names)
-    inventory = stage.GetPrimAtPath('/HumanBody').GetAttribute('cleanup:components')
+    inventory = stage.GetPrimAtPath('/HumanBody').GetAttribute(CLEANUP_ATTRIBUTE)
     if inventory and inventory.Get():
         settings['cleanup_components'] = json.loads(inventory.Get())
     (workspace / 'edit.json').write_text(json.dumps(settings))
@@ -94,8 +103,6 @@ def load_workspace(workspace: Path, *, vessel_names: list[str] | None = None) ->
 
 def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = None) -> Path:
     """Merge edits into the original contract and atomically publish a new version."""
-    from pxr import Usd, UsdGeom
-
     settings = load_workspace(workspace, vessel_names=vessel_names)
     source, manifest = Path(settings['source']), settings['manifest']
     vessel_names = settings['vessel_names']
@@ -117,10 +124,7 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
     changed = [_merge_mesh(original.GetPrimAtPath(path), mesh) for path, mesh in zip(paths, meshes)]
     _merge_materials(original, edited, meshes, paths, settings['token'])
 
-    completion = None
-    if settings.get('references'):
-        from ..refinement import validate_completion
-        completion = validate_completion(original, workspace, settings)
+    completion = validate_completion(original, workspace, settings) if settings.get('references') else None
 
     def write(folder):
         folder.mkdir()
@@ -158,7 +162,6 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
         if provenance.is_dir():
             shutil.copytree(provenance, folder / 'refinement')
         if completion is not None:
-            from ..refinement import publish_provenance
             publish_provenance(workspace, folder, completion)
         _copy_textures(original, workspace, target.parent)
         original.Export(str(target))
@@ -172,8 +175,6 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
 
 def _merge_mesh(target, edited, *, local=False) -> bool:
     """Keep original geometry exactly when only appearance changed."""
-    from pxr import Gf, Sdf, UsdGeom, Vt
-
     stage, source = target.GetStage(), edited.GetStage()
     mesh, original = UsdGeom.Mesh(edited), UsdGeom.Mesh(target)
     units = UsdGeom.GetStageMetersPerUnit(stage)
@@ -205,7 +206,7 @@ def _merge_mesh(target, edited, *, local=False) -> bool:
                 old_graph = np.asarray(target.GetAttribute('centerline:points').Get())
                 edges = np.asarray(target.GetAttribute('centerline:edges').Get())
                 spacing_m = centerline_spacing(old_graph, edges) * units
-                graph = _extract_mesh_centerline(points.astype(float) * units, faces, spacing_m)
+                graph = mesh_centerline(points.astype(float) * units, faces, spacing_m)
             except ValueError as exc:
                 raise CenterlineRegenerationError(
                     f'Cannot regenerate the USD centerline for {target.GetPath()}. {exc}'
@@ -238,8 +239,6 @@ def _merge_mesh(target, edited, *, local=False) -> bool:
 
 def _merge_materials(original, edited, meshes, paths, token):
     """Copy shader networks and remap their connections and mesh/subset bindings."""
-    from pxr import Sdf, Usd, UsdGeom, UsdShade
-
     materials = [p for p in edited.Traverse() if p.IsA(UsdShade.Material)]
     root = '/HumanBody/Looks/Edited_' + token
     UsdGeom.Scope.Define(original, root)
@@ -261,8 +260,6 @@ def _merge_materials(original, edited, meshes, paths, token):
 
 def _copy_textures(stage, workspace, destination):
     """Package texture dependencies with relative paths beside the final USD."""
-    from pxr import Sdf
-
     for prim in stage.Traverse():
         for attr in prim.GetAttributes():
             if attr.GetTypeName() != Sdf.ValueTypeNames.Asset:
@@ -285,8 +282,6 @@ def _copy_textures(stage, workspace, destination):
 
 def _navigation(stage, manifest, folder, names):
     """Reuse existing voxelization/centerline code; never retain stale navigation arrays."""
-    from pxr import UsdGeom
-
     artifacts = manifest['artifacts']
     scan = load_artifact(folder / artifacts['volume_metadata'])
     mask = np.zeros(scan.values_kji.shape, bool)
@@ -305,3 +300,87 @@ def _navigation(stage, manifest, folder, names):
     arrays['vessel_mask'] = native.astype(np.uint8)
     for key, array in arrays.items():
         np.save(folder / artifacts[key], array, allow_pickle=False)
+
+
+def annotate_cleanup(path: Path, cleanup: dict) -> None:
+    """Record cleanup's fragment decisions on ``/HumanBody`` for later agent sessions."""
+    inventory = {name: item['component_filter'] for name, item in cleanup.items() if 'component_filter' in item}
+    if not inventory:
+        return
+    stage = Usd.Stage.Open(str(path))
+    stage.GetPrimAtPath('/HumanBody').CreateAttribute(CLEANUP_ATTRIBUTE, Sdf.ValueTypeNames.String).Set(
+        json.dumps(inventory))
+    stage.GetRootLayer().Save()
+
+
+def read_edited_geometry(body: HumanBody, edited: Path) -> Usd.Stage:
+    """Replace changed meshes in ``body`` with the edited ones, keeping patient transforms.
+
+    Winding is normalized in memory only: the published or user-supplied file is never
+    rewritten. Returns that normalized stage for ``restore_appearance``.
+    """
+    stage = Usd.Stage.Open(str(edited))
+    units = UsdGeom.GetStageMetersPerUnit(stage)
+    for prim in stage.Traverse():
+        name = prim.GetCustomDataByKey('anatomy:name')
+        if not prim.IsA(UsdGeom.Mesh) or name not in body.anatomy.structures:
+            continue
+        structure = body.anatomy.structures[name]
+        mesh = UsdGeom.Mesh(prim)
+        _normalize_winding(mesh)
+        points, faces = validate_triangles(np.asarray(mesh.GetPointsAttr().Get(), dtype=float) * units,
+                                           np.asarray(mesh.GetFaceVertexIndicesAttr().Get()).reshape(-1, 3))
+        previous = np.asarray(structure.mesh.vertices)
+        if (points.shape == previous.shape and np.allclose(points, previous, rtol=0, atol=1e-5)
+                and np.array_equal(faces, np.asarray(structure.mesh.faces))):
+            continue
+        structure.mesh, structure.centerline = MeshGeometry(points, faces), None
+        if prim.HasAttribute('centerline:points'):
+            structure.centerline = CenterlineGraph(
+                points=np.asarray(prim.GetAttribute('centerline:points').Get(), dtype=float) * units,
+                edges=np.asarray(prim.GetAttribute('centerline:edges').Get(), dtype=np.int64),
+                radii=np.asarray(prim.GetAttribute('centerline:radii').Get(), dtype=float) * units,
+            )
+    return stage
+
+
+def _normalize_winding(mesh: UsdGeom.Mesh) -> None:
+    """Make a reflected (left-handed) edit right-handed, reordering its per-corner data."""
+    if mesh.GetOrientationAttr().Get() != UsdGeom.Tokens.leftHanded:
+        return
+    faces = np.asarray(mesh.GetFaceVertexIndicesAttr().Get()).reshape(-1, 3)
+    mesh.GetFaceVertexIndicesAttr().Set(faces[:, ::-1].ravel().tolist())
+    order = np.arange(faces.size).reshape(-1, 3)[:, ::-1].ravel()
+    for variable in UsdGeom.PrimvarsAPI(mesh).GetPrimvars():
+        if variable.GetInterpolation() == UsdGeom.Tokens.faceVarying:
+            values = variable.ComputeFlattened()
+            variable.Set([values[int(index)] for index in order])
+            variable.BlockIndices()
+    if mesh.GetNormalsInterpolation() == UsdGeom.Tokens.faceVarying:
+        normals = mesh.GetNormalsAttr().Get()
+        mesh.GetNormalsAttr().Set([normals[int(index)] for index in order])
+    mesh.GetOrientationAttr().Set(UsdGeom.Tokens.rightHanded)
+
+
+def restore_appearance(target: Path, edited: Usd.Stage, textured: set[str]) -> None:
+    """Carry the edit's materials and UVs onto final geometry, except for retextured structures.
+
+    ``edited`` is the stage returned by ``read_edited_geometry``, whose per-corner data
+    matches the normalized winding.
+    """
+    stage = Usd.Stage.Open(str(target))
+    meshes = [prim for prim in edited.Traverse() if prim.IsA(UsdGeom.Mesh)
+              and prim.GetCustomDataByKey('anatomy:name') not in textured
+              and stage.GetPrimAtPath(prim.GetPath())]
+    for mesh in meshes:
+        destination = stage.GetPrimAtPath(mesh.GetPath())
+        for prop in mesh.GetAuthoredProperties():
+            if prop.GetName().startswith(('primvars:', 'material:binding')) or prop.GetName() == 'normals':
+                Sdf.CopySpec(edited.GetRootLayer(), prop.GetPath(), stage.GetRootLayer(),
+                             destination.GetPath().AppendProperty(prop.GetName()))
+        for child in mesh.GetChildren():
+            if child.IsA(UsdGeom.Subset):
+                Sdf.CopySpec(edited.GetRootLayer(), child.GetPath(), stage.GetRootLayer(), child.GetPath())
+    _merge_materials(stage, edited, meshes, [str(mesh.GetPath()) for mesh in meshes], 'refinement')
+    _copy_textures(stage, Path(edited.GetRootLayer().realPath).parent, target.parent)
+    stage.GetRootLayer().Save()

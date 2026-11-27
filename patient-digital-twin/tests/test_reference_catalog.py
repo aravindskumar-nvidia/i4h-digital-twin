@@ -5,18 +5,18 @@ import csv
 import hashlib
 import io
 import json
-from pathlib import Path
 
 import pytest
-from patient_digital_twin import _reference_assets
+from patient_digital_twin import references
 from patient_digital_twin.references import (
+    CATALOG,
     catalog_reference,
     load_catalog,
     load_references,
     write_reference_files,
 )
 
-ASSETS = Path(__file__).parents[1] / 'assets/anatomy'
+ASSETS = CATALOG.parent
 COLON = 'voxel-man-colon-male-15882019'
 
 
@@ -30,7 +30,7 @@ def prepared(monkeypatch, tmp_path):
     def materialize(metadata, directory, cache=None, *, labels=None):
         calls.append(dict(metadata=metadata, labels=labels))
         return model, dict(metadata, sha256=hashlib.sha256(b'prepared model').hexdigest())
-    monkeypatch.setattr(_reference_assets, 'materialize', materialize)
+    monkeypatch.setattr(references, 'materialize', materialize)
     return calls
 
 
@@ -60,11 +60,9 @@ def test_every_catalog_entry_expands_to_complete_verified_metadata():
 
 @pytest.mark.parametrize('spec', [
     COLON,
-    str(ASSETS / 'catalog.json') + '#' + COLON,
-    # Paths documented before consolidation, and saved in existing pipeline checkpoints.
-    ASSETS / 'voxel-man/colon-male-15882019/metadata.json',
+    str(CATALOG) + '#' + COLON,
 ])
-def test_catalog_id_explicit_catalog_and_legacy_path_load_the_same_reference(prepared, spec):
+def test_catalog_id_and_explicit_catalog_load_the_same_reference(prepared, spec):
     item = load_references({'colon': spec})['colon']
     assert item['metadata']['id'] == COLON and item['nodes'] == ['colon']
     assert prepared[0]['labels']['rectum'] == [1579, 1582, 1585]
@@ -117,10 +115,7 @@ def test_catalog_accepts_other_organs_and_datasets(tmp_path, monkeypatch):
     assert item['metadata']['limitations'] == ['Shared limitation', 'Liver limitation']
     assert item['metadata']['source'] == dict(provider='Example Atlas', evidence='record.json',
                                               url='https://example.org/liver')
-    # A project catalog can replace the repository one, so its IDs work directly.
-    monkeypatch.setenv('I4H_ANATOMY_CATALOG', str(path))
-    assert load_references({'liver': 'atlas-liver'})['liver']['metadata']['id'] == 'atlas-liver'
     catalog['sources']['atlas']['license']['spdx'] = 'CC-BY-NC-ND-4.0'
     path.write_text(json.dumps(catalog))
     with pytest.raises(ValueError, match='CC BY 4.0'):
-        load_references({'liver': 'atlas-liver'})
+        load_references({'liver': f'{path}#atlas-liver'})

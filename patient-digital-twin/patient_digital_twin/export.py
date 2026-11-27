@@ -21,6 +21,7 @@ written to a sibling staging folder and moved into place only when complete.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import shutil
@@ -48,6 +49,10 @@ if TYPE_CHECKING:
     from .scan_volume import ScanVolume
 
 USD_SUFFIXES = {".usd", ".usda", ".usdc"}
+SKIN_OPACITY = 0.15
+# The CT exterior is meshed from voxels above this HU value on a grid strided by EXTERIOR_STRIDE.
+EXTERIOR_HU = -300
+EXTERIOR_STRIDE = 3
 
 
 def _surface_material(prim: Any, geometry: MeshGeometry, output: Path) -> None:
@@ -106,17 +111,12 @@ def _surface_material(prim: Any, geometry: MeshGeometry, output: Path) -> None:
         shader.CreateInput(name, kind).ConnectToSource(texture.ConnectableAPI(), channel)
 
 
-def _scan(body: HumanBody) -> ScanVolume | None:
-    """The attached ScanVolume, if any."""
-    return None if body.imaging is None else body.imaging.scan
-
-
-def _scan_from_body(body: HumanBody, scan: ScanVolume | None) -> NDArray[np.float64]:
+def _scan_from_body(body: HumanBody) -> NDArray[np.float64]:
     """Body frame (meters) to the scan's physical frame (still meters)."""
     registration = body.anatomy.body_to_imaging if body.imaging is None else body.imaging.body_to_imaging
     if registration is None:
         return np.eye(4)
-    flip = np.diag([-1.0, -1.0, 1.0, 1.0]) if scan is not None and scan.frame == "LPS" else np.eye(4)
+    flip = np.diag([-1.0, -1.0, 1.0, 1.0]) if body.imaging is not None and body.imaging.scan.frame == "LPS" else np.eye(4)
     return flip @ registration
 
 
@@ -137,14 +137,51 @@ def _write_scan(scan: ScanVolume, folder: Path, vessel_mask: ArrayLike | None = 
 
 
 def _publish(output: str | Path, prefix: str, write: Callable[[Path], Any]) -> Path:
-    """Run write(folder) in a sibling staging folder, then move it to a new output path."""
+    """Run write(folder) in a sibling staging folder, then rename it to a new output path.
+
+    The rename fails if anything has appeared at the output meanwhile, so concurrent
+    runs cannot merge into or replace each other's results.
+    """
     output = Path(output).expanduser().resolve()
     if output.exists():
         raise FileExistsError(f"Use a new output directory: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=output.parent, prefix=prefix) as temp:
         write(Path(temp) / "out")
-        shutil.move(str(Path(temp) / "out"), str(output))
+        try:
+            os.rename(Path(temp) / "out", output)
+        except OSError as error:
+            if error.errno in {errno.EEXIST, errno.ENOTEMPTY, errno.ENOTDIR}:
+                raise FileExistsError(f"Use a new output directory: {output}") from error
+            raise
+    return output
+
+
+def publish_usd(staged: Path, output: Path) -> Path:
+    """Publish a staged USD as ``output`` and the files beside it as ``<output>.assets``.
+
+    Asset paths are rewritten into that sidecar, which is published first; the USD is
+    then hard-linked into place, so neither step can replace a concurrent output.
+    """
+    from pxr import Sdf, Usd
+
+    sidecar = output.with_name(output.name + ".assets")
+    stage = Usd.Stage.Open(str(staged))
+    for prim in stage.Traverse():
+        for attr in prim.GetAttributes():
+            if attr.GetTypeName() == Sdf.ValueTypeNames.Asset and attr.Get():
+                attr.Set(Sdf.AssetPath(sidecar.name + "/" + attr.Get().path))
+    stage.GetRootLayer().Save()
+    _publish(sidecar, ".patient-assets-",
+             lambda folder: shutil.copytree(staged.parent, folder, ignore=shutil.ignore_patterns(staged.name)))
+    try:
+        with TemporaryDirectory(dir=output.parent, prefix=".patient-usd-") as temporary:
+            linked = Path(temporary) / staged.name
+            shutil.copy2(staged, linked)
+            os.link(linked, output)
+    except BaseException:
+        shutil.rmtree(sidecar)
+        raise
     return output
 
 
@@ -162,23 +199,20 @@ def write_artifacts(scan: ScanVolume, output: str | Path, *, vessel_mask: ArrayL
     return _publish(output, ".ct-artifacts-", lambda folder: _write_scan(scan, folder, vessel_mask))
 
 
-def _vessel_mask(body: HumanBody, scan: ScanVolume, names: Sequence[str]) -> NDArray[np.bool_]:
+def _vessel_mask(body: HumanBody, scan: ScanVolume, body_to_imaging: NDArray[np.floating],
+                 names: Sequence[str]) -> NDArray[np.bool_]:
     """Rasterize the requested vessel meshes onto the scan grid, exactly as the bundle USD places them.
 
-    Each mesh goes through ``body.imaging.body_to_imaging @ local_to_body``, so a custom
-    registration passed to ``attach_scan`` (or an edited structure placement) moves the
-    navigation mask and centerline together with the exported vessel.
+    Each mesh goes through ``body_to_imaging @ local_to_body``, so a custom registration
+    passed to ``attach_scan`` (or an edited structure placement) moves the navigation
+    mask and centerline together with the exported vessel. Callers check the meshes exist.
     """
-    imaging = body.imaging
-    if imaging is None:
-        raise ValueError("Vessel masks require attached CT")
-    scan_from_body = np.linalg.inv(scan.ijk_to_ras_m) @ imaging.body_to_imaging
+    scan_from_body = np.linalg.inv(scan.ijk_to_ras_m) @ body_to_imaging
     mask = np.zeros(scan.values_kji.shape, bool)
     for name in names:
         structure = body.anatomy.structures[name]
         vertices, faces = structure.mesh.vertices, structure.mesh.faces
-        if vertices is None or faces is None:
-            raise ValueError(f"Missing vessel mesh: {name}")
+        assert vertices is not None and faces is not None
         try:
             mask |= voxelize_mesh(
                 transform_points(vertices, scan_from_body @ structure.local_to_body), faces,
@@ -200,9 +234,9 @@ def export_to_usd(body: HumanBody, path: str | Path) -> Path:
     Example:
         ``export_to_usd(body, "patient.usdc")`` (same as ``body.export_to_usd("patient.usdc")``)
     """
-    scan = _scan(body)
+    scan = None if body.imaging is None else body.imaging.scan
     units = scan.meters_per_unit if scan is not None else 1.0
-    root = _scan_from_body(body, scan).copy()
+    root = _scan_from_body(body)
     root[:3, 3] /= units
     path = Path(path).expanduser().resolve()
     write_usd(body, path, units=units, root=root, scan=scan)
@@ -218,7 +252,7 @@ def write_usd(
     placement: NDArray[np.floating] | None = None,
     scan: ScanVolume | None = None,
     exterior: tuple[ArrayLike, ArrayLike] | None = None,
-    skin_opacity: float = 0.15,
+    skin_opacity: float = SKIN_OPACITY,
 ) -> dict[str, str]:
     """Write a USD stage and return ``{structure name: prim path}``.
 
@@ -233,7 +267,7 @@ def write_usd(
     try:
         from pxr import Gf, Sdf, Tf, Usd, UsdGeom, UsdShade, Vt
     except ImportError as exc:
-        raise ImportError("USD export is optional; install with: pip install usd-core") from exc
+        raise ImportError("USD export requires the 'usd' extra of patient-digital-twin") from exc
     path = Path(path)
     if path.suffix.lower() not in USD_SUFFIXES:
         raise ValueError("Use a .usd, .usda, or .usdc output file")
@@ -331,6 +365,21 @@ def write_usd(
     return prims
 
 
+def _ct_exterior(scan: ScanVolume, units: float) -> tuple[NDArray[np.floating], NDArray[np.integer]]:
+    """Mesh the patient's skin envelope from the CT, in stage-frame meters."""
+    from scipy import ndimage
+
+    # Keep only the body: the table and air cavities would otherwise add nested shells.
+    body_voxels = scan.values_kji[::EXTERIOR_STRIDE, ::EXTERIOR_STRIDE, ::EXTERIOR_STRIDE] > EXTERIOR_HU
+    labels, count = ndimage.label(ndimage.binary_closing(body_voxels, iterations=2))
+    if not count:
+        raise ValueError(f"CT has no voxels above {EXTERIOR_HU} HU to build an exterior from")
+    envelope = ndimage.binary_fill_holes(labels == np.argmax(np.bincount(labels.ravel())[1:]) + 1)
+    points, faces = mask_to_mesh(envelope)
+    points = transform_points(points * EXTERIOR_STRIDE, scan.ijk_to_world) * units
+    return points, faces[:, ::-1] if np.linalg.det(scan.ijk_to_world[:3, :3]) < 0 else faces
+
+
 def export_patient_twin(
     body: HumanBody,
     output: str | Path,
@@ -339,7 +388,7 @@ def export_patient_twin(
     vessel_names: Sequence[str] = (),
     world_from_patient_m: ArrayLike | None = None,
     ct_exterior: bool = False,
-    skin_opacity: float = 0.15,
+    skin_opacity: float = SKIN_OPACITY,
 ) -> Path:
     """Write a schema-2 patient bundle directory and return its ``patient_twin.yaml`` path.
 
@@ -360,27 +409,23 @@ def export_patient_twin(
     """
     if Path(output).expanduser().exists():
         raise FileExistsError(f"Use a new patient-twin output directory: {output}")
-    scan = _scan(body)
-    if ct_exterior and scan is None:
-        raise ValueError("CT exterior requires attached CT")
+    imaging = body.imaging
+    scan = None if imaging is None else imaging.scan
+    if (ct_exterior or vessel_names) and imaging is None:
+        raise ValueError("CT exterior and navigation vessels require attached CT")
     for name in vessel_names:
         if name not in body.anatomy.structures or body.anatomy.structures[name].is_empty:
             raise ValueError(f"Missing or disabled vessel mesh: {name}")
     units = scan.meters_per_unit if scan is not None else 1.0
     frame = scan.frame if scan is not None else "RAS" if body.anatomy.body_to_imaging is not None else "body"
-    mask = _vessel_mask(body, scan, vessel_names) if scan is not None and vessel_names else None
+    mask = None
     exterior = None
-    if ct_exterior and scan is not None:
-        from scipy import ndimage
-
-        # Keep only the body: the table and air cavities would otherwise add nested shells.
-        labels, count = ndimage.label(ndimage.binary_closing(scan.values_kji[::3, ::3, ::3] > -300, iterations=2))
-        envelope = ndimage.binary_fill_holes(labels == np.argmax(np.bincount(labels.ravel())[1:]) + 1) if count else None
-        if envelope is not None:
-            points, faces = mask_to_mesh(envelope)
-            points = transform_points(points * 3, scan.ijk_to_world) * units
-            exterior = (points, faces[:, ::-1] if np.linalg.det(scan.ijk_to_world[:3, :3]) < 0 else faces)
-    source_path = None if body.imaging is None else body.imaging.source_path
+    if imaging is not None:
+        if vessel_names:
+            mask = _vessel_mask(body, imaging.scan, imaging.body_to_imaging, vessel_names)
+        if ct_exterior:
+            exterior = _ct_exterior(imaging.scan, units)
+    source_path = None if imaging is None else imaging.source_path
 
     def write(folder: Path) -> None:
         """Write every bundle file into the staging ``folder``."""
@@ -390,7 +435,7 @@ def export_patient_twin(
         else:
             folder.mkdir()
         prims = write_usd(body, folder / "patient_anatomy.usdc", units=units, scan=None,
-                          placement=_scan_from_body(body, scan), exterior=exterior, skin_opacity=skin_opacity)
+                          placement=_scan_from_body(body), exterior=exterior, skin_opacity=skin_opacity)
         structures = body.anatomy.structures
         manifest: dict[str, Any] = {
             "schema_version": 2,

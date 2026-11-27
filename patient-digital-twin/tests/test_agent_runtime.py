@@ -32,44 +32,35 @@ def test_installer_checks_hash_and_reuses_cached_binary(tmp_path, monkeypatch, v
     monkeypatch.setattr(runtime.platform, 'machine', lambda: 'x86_64')
     monkeypatch.setattr(runtime, 'BLENDER_SHA256', hashlib.sha256(payload).hexdigest() if valid else '0' * 64)
     monkeypatch.setattr(runtime.urllib.request, 'urlopen', lambda *a, **kw: io.BytesIO(payload))
-    prompts = []
-    monkeypatch.setattr('builtins.input', lambda prompt: prompts.append(prompt) or 'y')
+    assert runtime.find_blender() is None
     if not valid:
         with pytest.raises(ValueError, match='SHA-256'):
-            runtime.ensure_blender()
+            runtime.install_blender()
         assert not list(tmp_path.rglob('blender-*/blender'))
         return
-    path = runtime.ensure_blender()
+    path = runtime.install_blender()
     assert Path(path).is_file() and os.access(path, os.X_OK)
     monkeypatch.setattr(runtime.urllib.request, 'urlopen', lambda *a, **kw: pytest.fail('Cached Blender was downloaded again'))
-    assert runtime.ensure_blender() == path
-    assert len(prompts) == 1
+    assert runtime.find_blender() == path
     Path(path).write_text('#!/bin/sh\necho "Blender 2.93.0"\n')
     with pytest.raises(RuntimeError, match='incompatible'):
-        runtime.ensure_blender()
+        runtime.find_blender()
     Path(path).write_text('#!/bin/sh\nexit 46\n')
     with pytest.raises(RuntimeError, match='--version failed.*BLENDER_EXECUTABLE'):
-        runtime.ensure_blender()
+        runtime.find_blender()
+    # A session never installs Blender; it names the setup command instead.
     Path(path).unlink()
-    monkeypatch.setattr('builtins.input', lambda _: 'n')
-    with pytest.raises(RuntimeError, match='cancelled'):
-        runtime.ensure_blender()
-
-    def no_input(_):
-        raise EOFError
-
-    monkeypatch.setattr('builtins.input', no_input)
-    with pytest.raises(RuntimeError, match='I4H_INSTALL_BLENDER=1'):
-        runtime.ensure_blender()
-    monkeypatch.setenv('I4H_INSTALL_BLENDER', '1')
-    monkeypatch.setattr(runtime.urllib.request, 'urlopen', lambda *a, **kw: io.BytesIO(payload))
-    assert runtime.ensure_blender() == path
+    monkeypatch.setattr(runtime, '_responding', lambda *a: False)
+    monkeypatch.setattr(runtime, 'headless', lambda: False)
+    with pytest.raises(RuntimeError, match='setup editing'):
+        with runtime.blender_session(tmp_path, {'command': 'unused', 'args': []}, 'auto'):
+            pass
 
 
 def test_existing_blender_is_not_installed_or_owned(tmp_path, monkeypatch):
     config = {'command': 'unused', 'args': [], 'env': {'BLENDER_PORT': '9876'}}
     monkeypatch.setattr(runtime, '_responding', lambda *a: True)
-    monkeypatch.setattr(runtime, 'ensure_blender', lambda: pytest.fail('Existing Blender must not trigger installation'))
+    monkeypatch.setattr(runtime, 'find_blender', lambda: pytest.fail('Existing Blender must not be looked up'))
     monkeypatch.setattr(runtime.subprocess, 'Popen', lambda *a, **kw: pytest.fail('Existing Blender must not launch a process'))
     with pytest.raises(RuntimeError, match='agent failure'):
         with runtime.blender_session(tmp_path, config) as connection:
@@ -87,7 +78,8 @@ def test_real_virtual_desktop_and_cleanup_on_failure(tmp_path, monkeypatch):
         pytest.skip('Set I4H_TEST_BLENDER and provide xvfb-run/xauth for the real runtime check')
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    from patient_digital_twin.agent.__main__ import BLENDER_TOOLS, mcp_config
+    from patient_digital_twin.agent.backends import BLENDER_TOOLS
+    from patient_digital_twin.agent.session import mcp_config
 
     monkeypatch.setenv('BLENDER_EXECUTABLE', executable)
     monkeypatch.delenv('DISPLAY', raising=False)

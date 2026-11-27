@@ -14,7 +14,8 @@ from patient_digital_twin.agent.assets import AssetValidationError
 @pytest.mark.parametrize('budget_exhausted', [False, True])
 def test_codex_streams_actual_sdk_notification_shape(monkeypatch, tmp_path, capsys, budget_exhausted):
     sdk = pytest.importorskip('openai_codex')
-    from patient_digital_twin.agent.__main__ import mcp_config, run_codex
+    from patient_digital_twin.agent.backends import run_codex
+    from patient_digital_twin.agent.session import mcp_config
     captured = {}
     prompts = []
     publish = Mock(side_effect=[AssetValidationError('Invalid mesh'), None])
@@ -91,7 +92,7 @@ def test_backend_limits_rejected_before_editing(tmp_path, backend, flag, value):
 
 def test_claude_receives_blender_tools(monkeypatch, tmp_path):
     sdk = pytest.importorskip('claude_agent_sdk')
-    from patient_digital_twin.agent.__main__ import run_claude
+    from patient_digital_twin.agent.backends import run_claude
     captured = []
     publish = Mock(side_effect=[AssetValidationError('Invalid mesh'), None])
 
@@ -117,7 +118,7 @@ def test_claude_receives_blender_tools(monkeypatch, tmp_path):
 
 def test_claude_budget_is_cumulative_across_repairs(monkeypatch, tmp_path):
     sdk = pytest.importorskip('claude_agent_sdk')
-    from patient_digital_twin.agent.__main__ import run_claude
+    from patient_digital_twin.agent.backends import run_claude
     captured, costs = [], iter([.6, 1.2])
     publish = Mock(side_effect=AssetValidationError('Invalid mesh'))
 
@@ -138,7 +139,7 @@ def test_blender_validation_error_survives_mcp_cleanup(tmp_path, monkeypatch):
     mcp = pytest.importorskip('mcp')
     import anyio
     from mcp.client import stdio as mcp_stdio
-    from patient_digital_twin.agent import __main__ as cli
+    from patient_digital_twin.agent import session
 
     async def initialize():
         pass
@@ -159,4 +160,4 @@ def test_blender_validation_error_survives_mcp_cleanup(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp, 'ClientSession', client)
     monkeypatch.setattr(mcp_stdio, 'stdio_client', stdio)
     with pytest.raises(AssetValidationError, match='Invalid mesh'):
-        asyncio.run(cli.blender_call({'command': sys.executable, 'args': []}, 'export_asset', tmp_path))
+        asyncio.run(session.blender_call({'command': sys.executable, 'args': []}, 'export_asset', tmp_path))

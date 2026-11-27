@@ -5,14 +5,21 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import os
-import platform
 import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
 
-from .agent.runtime import ensure_blender
+from ._texture_setup import setup_texture
+from .agent.runtime import (
+    VIRTUAL_DISPLAY_TOOLS,
+    find_blender,
+    headless,
+    install_blender,
+)
+
+# Import names of the editing extra's packages.
+_EDITING_MODULES = ('mcp', 'openai_codex', 'claude_agent_sdk', 'pxr', 'vtk', 'trimesh', 'PIL')
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -20,7 +27,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('component', nargs='?', choices=('editing', 'texture'), default='editing')
     args = parser.parse_args(argv)
     if args.component == 'texture':
-        from ._texture_setup import setup_texture
         try:
             checkout = setup_texture()
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
@@ -29,22 +35,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f'Texture setup complete. TRELLIS.2: {checkout}\n'
               'Model weights download automatically on first use.')
         return 0
-    required = ('mcp', 'openai_codex', 'claude_agent_sdk', 'pxr', 'vtk', 'trimesh', 'PIL')
-    missing = [name for name in required if importlib.util.find_spec(name) is None]
-    if missing:
-        print('Missing editing dependencies: ' + ', '.join(missing) + '.\n'
-              "Run: uv pip install -e './patient-digital-twin[editing]'", file=sys.stderr)
+    if missing := [name for name in _EDITING_MODULES if importlib.util.find_spec(name) is None]:
+        print(f'Missing editing dependencies: {", ".join(missing)}. '
+              "Install the 'editing' extra of patient-digital-twin first.", file=sys.stderr)
         return 1
-    headless = platform.system() == 'Linux' and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
-    if headless and any(shutil.which(name) is None for name in ('xvfb-run', 'xauth')):
+    if headless() and any(shutil.which(tool) is None for tool in VIRTUAL_DISPLAY_TOOLS):
         print('Headless editing needs Xvfb and xauth. On Ubuntu, run:\n'
               '  sudo apt install xvfb xauth\nThen rerun: patient-digital-twin setup editing', file=sys.stderr)
         return 1
     try:
-        executable = ensure_blender(install=True)
+        executable = find_blender() or install_blender()
     except (OSError, RuntimeError, ValueError) as exc:
         print(f'Editing setup failed: {exc}', file=sys.stderr)
         return 1
     print(f'Editing setup complete. Blender: {executable}\n'
-          'Codex and Claude SDKs are installed. Authenticate your chosen backend before editing.')
+          'Authenticate your chosen agent backend before editing. The agent runs Python in Blender '
+          'with your permissions; see docs/agents.md#security.')
     return 0

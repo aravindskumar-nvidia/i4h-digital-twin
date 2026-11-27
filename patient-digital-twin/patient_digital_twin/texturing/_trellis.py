@@ -5,11 +5,18 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
+
+MODEL = 'microsoft/TRELLIS.2-4B'
+IMAGE_ENCODER = 'facebook/dinov3-vitl16-pretrain-lvd1689m'
+# Native modules built by `patient-digital-twin setup texture`.
+NATIVE_MODULES = ('cumesh', 'flex_gemm', 'o_voxel', 'nvdiffrast.torch', 'flash_attn', 'trellis2.pipelines')
 
 
 def match_tile_palette(generated, reference):
@@ -123,7 +130,7 @@ def run(work: Path) -> None:
     base_color = material.baseColorTexture.convert("RGB")
     # Keep raw inference output inspectable as well as the final color map.
     base_color.save(work / "base_color_generated.png")
-    if config.get('match_reference_color', True):
+    if config['match_reference_color']:
         with Image.open(config['texture_square']) as tile:
             base_color, config['palette_match'] = match_tile_palette(base_color, tile)
     base_color.save(work / "base_color.png")
@@ -139,11 +146,11 @@ def cache_identity(root: Path) -> dict:
     from huggingface_hub import try_to_load_from_cache
 
     models = {
-        'microsoft/TRELLIS.2-4B': ['texturing_pipeline.json',
+        MODEL: ['texturing_pipeline.json',
             'ckpts/shape_enc_next_dc_f16c32_fp16.json', 'ckpts/shape_enc_next_dc_f16c32_fp16.safetensors',
             'ckpts/tex_dec_next_dc_f16c32_fp16.json', 'ckpts/tex_dec_next_dc_f16c32_fp16.safetensors',
             'ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.json', 'ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.safetensors'],
-        'facebook/dinov3-vitl16-pretrain-lvd1689m': ['config.json', 'model.safetensors'],
+        IMAGE_ENCODER: ['config.json', 'model.safetensors'],
     }
     files = [Path(__file__), *sorted((root / 'trellis2').rglob('*.py'))]
     missing = False
@@ -155,21 +162,24 @@ def cache_identity(root: Path) -> dict:
             else:
                 missing = True
     # Unknown weights cannot safely share an inference checkpoint.
-    from uuid import uuid4
     return {'files': [(str(f), f.stat().st_size, f.stat().st_mtime_ns) for f in files],
             'uncached': uuid4().hex if missing else None}
 
 
+def check(root: Path) -> dict:
+    """Import every native module, require a GPU, and return the cache identity."""
+    sys.path.insert(0, str(root))
+    import torch
+
+    for module in NATIVE_MODULES:
+        importlib.import_module(module)
+    if not torch.cuda.is_available():
+        raise RuntimeError('TRELLIS.2 requires a CUDA-capable environment')
+    return cache_identity(root)
+
+
 if __name__ == "__main__":
     if sys.argv[1] == '--check':
-        sys.path.insert(0, sys.argv[2])
-        import importlib
-
-        import torch
-        for module in ('cumesh', 'nvdiffrast.torch', 'o_voxel', 'trellis2.pipelines'):
-            importlib.import_module(module)
-        if not torch.cuda.is_available():
-            raise RuntimeError('TRELLIS.2 requires a CUDA-capable environment')
-        print(json.dumps(cache_identity(Path(sys.argv[2]))))
+        print(json.dumps(check(Path(sys.argv[2]))))
     else:
         run(Path(sys.argv[1]))

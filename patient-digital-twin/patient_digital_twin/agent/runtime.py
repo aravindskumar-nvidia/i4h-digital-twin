@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -21,12 +22,21 @@ import time
 import urllib.request
 from pathlib import Path
 
+from .._cache import cache_directory
+
 MCP_PACKAGE = 'mcp-for-blender==2.3.0'
 MCP_PROTOCOL = 16  # Protocol shipped with the pinned server/add-on.
 MCP_MIN_BLENDER_VERSION = (3, 0, 0)
 BLENDER_VERSION = '5.1.2'
 BLENDER_URL = f'https://download.blender.org/release/Blender5.1/blender-{BLENDER_VERSION}-linux-x64.tar.xz'
 BLENDER_SHA256 = 'aaccb355f50183979b698bcce7467103a76261b5fa59f4972295842662a285fb'
+VIRTUAL_DISPLAY_TOOLS = ('xvfb-run', 'xauth')
+INSTALL_BLENDER = 'patient-digital-twin setup editing'
+
+
+def headless() -> bool:
+    """True on Linux without an X or Wayland display, where Blender needs Xvfb."""
+    return platform.system() == 'Linux' and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
 
 
 def _supported_blender_version(version: str) -> bool:
@@ -48,30 +58,27 @@ def _checked_blender(executable: str) -> str:
     return executable
 
 
-def ensure_blender(*, install: bool = False) -> str:
-    """Reuse Blender; setup explicitly installs it, otherwise ask before downloading."""
+def _managed_blender() -> Path:
+    return cache_directory('blender') / f'blender-{BLENDER_VERSION}-linux-x64' / 'blender'
+
+
+def find_blender() -> str | None:
+    """Return a compatible Blender (BLENDER_EXECUTABLE, PATH, or the managed install), or None."""
     requested = os.environ.get('BLENDER_EXECUTABLE')
-    executable = shutil.which(requested or 'blender')
-    if executable:
+    if executable := shutil.which(requested or 'blender'):
         return _checked_blender(executable)
     if requested:
         raise FileNotFoundError(f'BLENDER_EXECUTABLE does not exist: {requested}')
+    managed = _managed_blender()
+    return _checked_blender(str(managed)) if managed.is_file() else None
+
+
+def install_blender() -> str:
+    """Download, verify and unpack the pinned Blender release into the managed cache."""
     if platform.system() != 'Linux' or platform.machine() not in {'x86_64', 'AMD64'}:
         raise RuntimeError('Automatic installation supports Linux x86_64; install Blender and set BLENDER_EXECUTABLE')
-    cache = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'i4h/blender'
-    destination = cache / f'blender-{BLENDER_VERSION}-linux-x64'
-    if (destination / 'blender').is_file():
-        return _checked_blender(str(destination / 'blender'))
-    if install or os.environ.get('I4H_INSTALL_BLENDER') == '1':
-        answer = 'y'
-    else:
-        try:
-            answer = input(f'Download and install Blender {BLENDER_VERSION} in {cache}? [y/N] ')
-        except EOFError:
-            raise RuntimeError('Blender installation requires Y/N confirmation; no input is available. '
-                               'Set I4H_INSTALL_BLENDER=1 to approve it non-interactively.') from None
-    if answer.strip().lower() not in {'y', 'yes'}:
-        raise RuntimeError('Blender installation cancelled. Install Blender and set BLENDER_EXECUTABLE.')
+    destination = _managed_blender().parent
+    cache = destination.parent
     cache.mkdir(parents=True, exist_ok=True)
     print(f'Installing Blender {BLENDER_VERSION} in {cache}', file=sys.stderr, flush=True)
     with tempfile.TemporaryDirectory(prefix='.install-', dir=cache) as temp:
@@ -151,13 +158,15 @@ def blender_session(workspace: Path, config: dict, mode: str = 'auto'):
     if mode == 'existing':
         raise RuntimeError(f'No compatible Blender MCP session at {host}:{port}; '
                            f'{MCP_PACKAGE} requires add-on protocol {MCP_PROTOCOL}.')
-    virtual = mode == 'virtual' or (platform.system() == 'Linux' and not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')))
+    virtual = mode == 'virtual' or headless()
     prefix = []
     if virtual:
-        if platform.system() != 'Linux' or not shutil.which('xvfb-run') or not shutil.which('xauth'):
+        if platform.system() != 'Linux' or any(shutil.which(tool) is None for tool in VIRTUAL_DISPLAY_TOOLS):
             raise RuntimeError('Virtual Blender requires Linux, xvfb-run and xauth (Ubuntu: sudo apt install xvfb xauth)')
         prefix = ['xvfb-run', '-a', '--server-args=-screen 0 1280x960x24 -nolisten tcp']
-    executable = ensure_blender()
+    executable = find_blender()
+    if executable is None:
+        raise RuntimeError(f'Blender is not installed. Run: {INSTALL_BLENDER}, or set BLENDER_EXECUTABLE.')
     addon = workspace / 'addon.py'
     # Load the add-on bundled with the same pinned upstream server; no user preferences are changed.
     subprocess.run(['uvx', '--from', MCP_PACKAGE, 'python', '-c',
@@ -230,9 +239,9 @@ def _stop_blender(process: subprocess.Popen, blender_pid: int | None) -> None:
 
 def _start_addon() -> None:
     """Blender startup entry point: register upstream in this process, on a private port."""
-    import importlib.util
-
+    # This runs inside Blender's Python, the only place bpy and gpu exist.
     import bpy
+    import gpu
 
     addon_path, ready_path = sys.argv[sys.argv.index('--') + 1:]
     spec = importlib.util.spec_from_file_location('i4h_blender_mcp', addon_path)
@@ -250,7 +259,6 @@ def _start_addon() -> None:
         raise RuntimeError('Blender MCP add-on failed to start')
     ready = Path(ready_path)
     temporary = ready.with_suffix('.tmp')
-    import gpu
     temporary.write_text(json.dumps({
         'port': server.socket.getsockname()[1], 'pid': os.getpid(),
         'display': os.environ.get('DISPLAY'), 'blender_version': bpy.app.version_string,

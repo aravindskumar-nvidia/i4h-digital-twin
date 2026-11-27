@@ -12,34 +12,49 @@ authors = [{ name = "i4h" }]
 dependencies = ["numpy>=1.24", "nibabel>=5.0", "PyYAML>=6.0", "scikit-image>=0.22"]
 
 [project.optional-dependencies]
-texture = [
+# Extras build on each other through this package's own name, so each requirement is declared once.
+# OpenUSD: usd-core has no Linux aarch64 wheel; usd-exchange provides pxr there.
+usd = [
   "usd-core>=24.3; sys_platform != 'linux' or platform_machine != 'aarch64'",
   "usd-exchange>=2.2; sys_platform == 'linux' and platform_machine == 'aarch64'",
-  "vtk",
-  "scipy>=1.10",
-  "trimesh",
-  "Pillow>=10",
 ]
+# USD export, centerlines and mesh cleanup.
+pipeline = ["patient-digital-twin[usd]", "vtk", "scipy>=1.10", "trimesh"]
+dicom = ["SimpleITK>=2.3.0"]
+nvsegment = ["torch>=2.4", "monai>=1.5", "pytorch-ignite>=0.5", "fire>=0.6", "einops>=0.7", "huggingface_hub>=0.20", "matplotlib>=3.7", "tqdm>=4.65", "scipy>=1.10"]
+nvgenerate = ["torch>=2.4", "monai>=1.5", "einops>=0.7", "huggingface_hub>=0.20", "matplotlib>=3.7", "tqdm>=4.65", "fire>=0.5", "tensorboard>=2.14", "scipy>=1.10"]
+# Agent editing in Blender with either backend.
 editing = [
-  "usd-core>=24.3; sys_platform != 'linux' or platform_machine != 'aarch64'",
-  "usd-exchange>=2.2; sys_platform == 'linux' and platform_machine == 'aarch64'",
-  "vtk",
-  "scipy>=1.10",
-  "trimesh",
+  "patient-digital-twin[pipeline]",
   "Pillow>=10",
   "mcp>=1.26,<2",
   "openai-codex>=0.163,<0.164",
   "claude-agent-sdk>=0.2.154,<0.3",
 ]
-dicom = ["SimpleITK>=2.3.0"]
-agent = ["mcp>=1.26,<2"]
-claude = ["mcp>=1.26,<2", "claude-agent-sdk>=0.2.154,<0.3"]
-codex = ["mcp>=1.26,<2", "openai-codex>=0.163,<0.164"]
-nvsegment = ["torch>=2.4", "monai>=1.5", "pytorch-ignite>=0.5", "fire>=0.6", "einops>=0.7", "huggingface_hub>=0.20", "matplotlib>=3.7", "tqdm>=4.65", "scipy>=1.10"]
-nvgenerate = ["torch>=2.4", "monai>=1.5", "einops>=0.7", "huggingface_hub>=0.20", "matplotlib>=3.7", "tqdm>=4.65", "fire>=0.5", "tensorboard>=2.14", "scipy>=1.10"]
-pipeline = ["usd-core>=24.3; sys_platform != 'linux' or platform_machine != 'aarch64'", "usd-exchange>=2.2; sys_platform == 'linux' and platform_machine == 'aarch64'", "vtk", "scipy>=1.10"]
-dev = ["pytest>=8.0", "mypy>=1.10", "pydicom>=2.4", "usd-core>=24.3; sys_platform != 'linux' or platform_machine != 'aarch64'", "usd-exchange>=2.2; sys_platform == 'linux' and platform_machine == 'aarch64'", "vtk", "scipy>=1.10", "SimpleITK>=2.3.0", "trimesh", "Pillow>=10"]  # Everything the test suite exercises.
-usd = ["usd-core>=24.3; sys_platform != 'linux' or platform_machine != 'aarch64'", "usd-exchange>=2.2; sys_platform == 'linux' and platform_machine == 'aarch64'"]
+# TRELLIS.2 texturing. `patient-digital-twin setup texture` then builds its pinned CUDA extensions.
+texture = [
+  "patient-digital-twin[pipeline]",
+  "Pillow>=10",
+  "torch>=2.4",
+  "torchvision",
+  # Build tools for the CUDA extensions.
+  "setuptools>=68",
+  "wheel",
+  "packaging",
+  "ninja",
+  "psutil",
+  # Imported by TRELLIS.2.
+  "easydict",
+  "opencv-python-headless",
+  "transformers>=4.56,<5",
+  "huggingface_hub",
+  "safetensors",
+  "zstandard",
+  "plyfile",
+  "tqdm",
+]
+# Everything the test suite exercises.
+dev = ["patient-digital-twin[pipeline,dicom]", "Pillow>=10", "pytest>=8.0", "mypy>=1.10", "pydicom>=2.4"]
 # Deprecated vasculature_digital_twin package (all of its former optional features).
 vasculature = ["SimpleITK>=2.3", "scipy>=1.10", "scikit-image>=0.22", "totalsegmentator>=2.7", "vtk>=9.2", "warp-lang>=1.3"]
 
@@ -65,4 +80,4 @@ ignore_missing_imports = true
 follow_imports = "silent"
 
 [tool.setuptools.package-data]
-patient_digital_twin = ["data/textures/*.json", "data/textures/*.png"]
+patient_digital_twin = ["data/textures/*.json", "data/textures/*.png", "data/anatomy/*.json", "data/anatomy/licenses/*", "data/anatomy/provenance/*"]
