@@ -22,7 +22,7 @@ Main contents:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from nibabel.orientations import apply_orientation, inv_ornt_aff, io_orientation
@@ -86,6 +86,31 @@ def centerline_spacing(points: ArrayLike, edges: ArrayLike) -> float:
     return spacing
 
 
+def triangle_polydata(vertices: ArrayLike, faces: ArrayLike) -> Any:
+    """Copy a triangle mesh into a new ``vtkPolyData`` (VTK comes with the 'pipeline' extra)."""
+    try:
+        import vtk
+        from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray
+    except ImportError as exc:
+        raise ImportError("Mesh processing requires the 'pipeline' extra of patient-digital-twin") from exc
+    triangles = np.asarray(faces, dtype=np.int64)
+    points, cells, surface = vtk.vtkPoints(), vtk.vtkCellArray(), vtk.vtkPolyData()
+    points.SetData(numpy_to_vtk(np.asarray(vertices, dtype=float), deep=True))
+    cells.SetData(numpy_to_vtkIdTypeArray(np.arange(0, 3 * (len(triangles) + 1), 3, dtype=np.int64), deep=True),
+                  numpy_to_vtkIdTypeArray(triangles.ravel(), deep=True))
+    surface.SetPoints(points)
+    surface.SetPolys(cells)
+    return surface
+
+
+def polydata_arrays(surface: Any) -> tuple[NDArray[np.floating], NDArray[np.integer]]:
+    """Vertices and triangles of a triangulated ``vtkPolyData``."""
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    return (vtk_to_numpy(surface.GetPoints().GetData()),
+            vtk_to_numpy(surface.GetPolys().GetConnectivityArray()).reshape(-1, 3))
+
+
 def validate_triangles(
     vertices: ArrayLike, faces: ArrayLike, *, name: str = "mesh"
 ) -> tuple[NDArray[np.float64], NDArray[np.integer]]:
@@ -146,28 +171,15 @@ def voxelize_mesh(
     Raises:
         ValueError: For degenerate triangles or an open / non-manifold surface.
     """
-    try:
-        import vtk
-        from vtk.util.numpy_support import (
-            numpy_to_vtk,
-            numpy_to_vtkIdTypeArray,
-            vtk_to_numpy,
-        )
-    except ImportError as exc:
-        raise ImportError("Mesh voxelization requires the 'pipeline' extra of patient-digital-twin") from exc
     shape, spacing = np.asarray(shape_zyx), np.asarray(spacing_zyx_m, dtype=float)
     v, f = validate_triangles(vertices, faces)
     t = v[f]
     if np.any(np.linalg.norm(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]), axis=1) == 0):
         raise ValueError("Mesh contains degenerate triangles")
-    points, cells, surface = vtk.vtkPoints(), vtk.vtkCellArray(), vtk.vtkPolyData()
-    points.SetData(numpy_to_vtk(v, deep=True))
-    cells.SetData(
-        numpy_to_vtkIdTypeArray(np.arange(0, 3 * (len(f) + 1), 3, dtype=np.int64), deep=True),
-        numpy_to_vtkIdTypeArray(f.astype(np.int64).ravel(), deep=True),
-    )
-    surface.SetPoints(points)
-    surface.SetPolys(cells)
+    surface = triangle_polydata(v, f)
+    import vtk
+    from vtk.util.numpy_support import vtk_to_numpy
+
     clean = vtk.vtkCleanPolyData()  # Welds coincident STL vertices.
     clean.SetInputData(surface)
     clean.Update()

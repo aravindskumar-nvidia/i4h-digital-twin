@@ -16,7 +16,7 @@ Main contents:
   ``local_to_body`` (imported placement) and ``local_to_world`` (current pose), an
   ``enabled`` flag that hides geometry without deleting it, and an optional centerline.
 - ``AnatomyCollection``: ``structures`` keyed by name, the source registration
-  ``body_to_imaging``, the source label volume (for scan-grid vessel masks), plus
+  ``body_to_imaging``, plus
   ``select`` and the ``set_*_enabled`` visibility controls. Importers return one of these;
   ``HumanBody`` (in ``body.py``) wraps it.
 

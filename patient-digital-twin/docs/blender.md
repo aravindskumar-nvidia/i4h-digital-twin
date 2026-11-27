@@ -34,3 +34,7 @@ The selection is validated before editing and reused by `finalize()`.
 
 Supported: existing meshes, transforms, UVs and USD Preview Surface materials/image
 textures. Add/delete/split/join, rigs and animation are unsupported.
+
+The printed commands run this repository's helper in Blender's Python, with your
+permissions. [Agent editing](agents.md) runs model-written Python in Blender the same
+way; read its [security notes](agents.md#security) before using it.
