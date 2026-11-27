@@ -26,8 +26,8 @@ def parse(flags):
 
 
 def test_agent_texture_and_cleanup_settings(tmp_path, monkeypatch):
-    from patient_digital_twin import references
-    monkeypatch.setattr(references, 'load_references', lambda *args, **kwargs: {})
+    from patient_digital_twin import agent
+    monkeypatch.setattr(agent, 'resolve_references', lambda *args, **kwargs: {})
     run = parse([
         '--agent-prompt', 'Complete only the colon', '--agent-model', 'gpt-6.1-terra',
         '--agent-backend', 'codex', '--agent-timeout', '900', '--token-budget', '100000',
@@ -40,7 +40,7 @@ def test_agent_texture_and_cleanup_settings(tmp_path, monkeypatch):
     ])
     assert run.agent.model == 'gpt-6.1-terra'
     assert run.agent.timeout_s == 900 and run.agent.token_budget == 100000
-    assert run.agent.anatomy_references == {'colon': tmp_path / 'reference.json'}
+    assert run.agent.anatomy_references == {'colon': str(tmp_path / 'reference.json')}
     # Catalog IDs are kept as written; only file paths are made absolute.
     by_id = parse(['--agent-prompt', 'Complete only the colon',
                  '--anatomy-reference', 'colon=voxel-man-colon-male-15882019'])
@@ -85,7 +85,7 @@ def test_explicit_tile_overrides_and_default_optout(tmp_path):
 def test_missing_trellis_installation_fails_without_path_guessing(monkeypatch):
     from patient_digital_twin import texturing
     monkeypatch.setattr(texturing.importlib.util, 'find_spec', lambda name: None)
-    with pytest.raises(ImportError, match='active Python environment'):
+    with pytest.raises(ImportError, match='setup texture'):
         texturing.TextureRuntime()
 
 
@@ -102,9 +102,9 @@ def test_major_branching_is_explicit_in_both_clis():
 
 
 def test_named_operations_without_verbal_prompt(tmp_path, monkeypatch):
-    from patient_digital_twin import references
+    from patient_digital_twin import agent
     from patient_digital_twin.agent.prompts import build_prompt
-    monkeypatch.setattr(references, 'load_references', lambda *args, **kwargs: {})
+    monkeypatch.setattr(agent, 'resolve_references', lambda *args, **kwargs: {})
     for task in ('complete', 'repair'):
         run = parse(['--agent-task', task, '--anatomy-reference', f'colon={tmp_path}/ref.json'])
         assert run.agent.task == task and run.agent.prompt == ''

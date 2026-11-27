@@ -12,6 +12,7 @@ import pytest
 import yaml
 from patient_digital_twin import HumanBody, SegmentationImporter
 from patient_digital_twin.agent import __main__ as cli
+from patient_digital_twin.agent import session
 from patient_digital_twin.agent.assets import finalize, prepare
 from patient_digital_twin.scan_volume import from_array
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
@@ -107,16 +108,17 @@ def test_recovery_reuses_saved_edit(asset, tmp_path, monkeypatch, saved):
         if function == 'export_asset':
             (work / 'edited.usdc').write_bytes((work / 'input.usdc').read_bytes())
 
-    monkeypatch.setattr(cli, 'blender_call', blender_call)
-    monkeypatch.setattr(cli, 'blender_session', lambda *args: nullcontext({}))
+    monkeypatch.setattr(session, 'blender_call', blender_call)
+    monkeypatch.setattr(session, 'blender_session', lambda *args: nullcontext({}))
     def run_codex(*args, publish, **kwargs):
         calls.append('agent')
         publish()
 
-    monkeypatch.setattr(cli, 'run_codex', run_codex)
+    monkeypatch.setattr(session, 'run_codex', run_codex)
     command = ['resume' if saved == 'resume' else 'finalize',
                '--workspace', str(work), '--output', str(tmp_path / 'final')]
     if saved == 'resume':
+        (work / 'task_prompt.txt').write_text('Saved task')
         command += ['--backend', 'codex', 'Repair the saved edit.']
     assert cli.main(command) == 0
     expected = {
@@ -210,8 +212,8 @@ def test_real_filtered_reference_survives_idle(asset, monkeypatch):
         pytest.skip('Set I4H_TEST_BLENDER and I4H_TEST_REFERENCE_IDLE to HRA aorta metadata (75s idle check)')
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
+    from patient_digital_twin.agent.completion import prepare_references
     from patient_digital_twin.agent.runtime import blender_session
-    from patient_digital_twin.refinement import prepare_references
 
     _, work = asset
     prepare_references(work, {'aorta': Path(reference).resolve()}, include_major_branches=True)
@@ -236,7 +238,7 @@ for scene in bpy.data.scenes:
 """
 
     async def inspect(config):
-        await cli.blender_call(config, 'open_asset', work)
+        await session.blender_call(config, 'open_asset', work)
         async with stdio_client(StdioServerParameters(**config)) as (read, write):
             async with ClientSession(read, write) as client:
                 await client.initialize()
@@ -248,7 +250,7 @@ for scene in bpy.data.scenes:
                     result = await client.call_tool('look', {'image': 'Render Result', 'max_size': 256})
                     assert not result.isError and any(c.type == 'image' for c in result.content)
 
-    with blender_session(work, cli.mcp_config(), 'virtual') as config:
+    with blender_session(work, session.mcp_config(), 'virtual') as config:
         asyncio.run(inspect(config))
 
 

@@ -3,9 +3,12 @@
 
 """Regression against source-path workarounds: use isolated installed imports."""
 
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def test_installed_meshing_from_unrelated_directory(tmp_path):
@@ -32,6 +35,22 @@ print("installed patient mesher OK")
         check=True,
     )
     assert "installed patient mesher OK" in result.stdout
+
+
+def test_root_extras_mirror_patient_extras():
+    tomllib = pytest.importorskip("tomllib")
+    root = Path(__file__).resolve().parents[2]
+    patient = tomllib.loads((root / "patient-digital-twin/pyproject.toml").read_text())
+    aggregate = tomllib.loads((root / "pyproject.toml").read_text())
+
+    def aggregate_name(requirement):
+        # patient-digital-twin[a,b] becomes digital-twin[patient-a,patient-b].
+        return re.sub(r"patient-digital-twin\[([^\]]+)\]", lambda match: "digital-twin[" + ",".join(
+            "patient-" + extra for extra in match[1].split(",")) + "]", requirement)
+
+    expected = {("dev" if name == "dev" else "patient-" + name): list(map(aggregate_name, requirements))
+                for name, requirements in patient["project"]["optional-dependencies"].items()}
+    assert aggregate["project"]["optional-dependencies"] == expected
 
 
 def test_pipeline_help_uses_installed_package(tmp_path):

@@ -75,14 +75,10 @@ def test_nvsegment_to_real_usd(monkeypatch, tmp_path, modality):
     assert bool(stage.GetPrimAtPath("/HumanBody/Imaging/CT")) == (modality == "CT")
 
 
-@pytest.mark.parametrize("stored", [False, True])
-def test_bundle_centerline_uses_ct_grid_and_preserves_structure_graph(
-    monkeypatch, tmp_path, stored
-):
+def test_bundle_centerline_uses_ct_grid_and_stores_structure_graph(monkeypatch, tmp_path):
     pytest.importorskip("pxr")
     pytest.importorskip("vtk")
     import yaml
-    from patient_digital_twin import HumanBody
 
     shape = (25, 25, 41)
     x, y, z = np.indices(shape)
@@ -95,9 +91,6 @@ def test_bundle_centerline_uses_ct_grid_and_preserves_structure_graph(
     anatomy = segmentation_anatomy(
         nib.Nifti1Image(mask, image.affine), {1: "aorta"}, names=["aorta"]
     )
-    if stored:
-        HumanBody(anatomy).extract_topology(spacing_m=0.0015)
-    previous = anatomy.structures["aorta"].centerline
     monkeypatch.setattr(
         main.NVSegmentImporter, "to_anatomy_collection", lambda self, **kw: anatomy
     )
@@ -128,8 +121,6 @@ def test_bundle_centerline_uses_ct_grid_and_preserves_structure_graph(
     for relative in manifest["artifacts"].values():
         assert (path.parent / relative).is_file()
     graph = anatomy.structures["aorta"].centerline
-    if stored:
-        assert graph is previous
     assert len(graph.points) > 2
     points = np.load(path.parent / "centerline_points.npy")
     np.testing.assert_allclose(points[:, :2], 12.0, atol=2)

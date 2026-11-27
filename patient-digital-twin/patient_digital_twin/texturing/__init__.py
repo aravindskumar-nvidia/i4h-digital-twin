@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Fixed-mesh texturing functions with an isolated, optional CUDA worker."""
+"""Fixed-mesh texturing; TRELLIS.2 inference runs in a separate CUDA worker process."""
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +16,11 @@ import numpy as np
 
 from ..anatomy import MeshGeometry, SurfaceMaterial
 from ..geometry import validate_triangles
-from ..references import TextureReference
+from ._trellis import MODEL
+from .tiles import MissingTextureDefault, TextureReference, default_texture_reference
+
+__all__ = ['MissingTextureDefault', 'TextureOptions', 'TextureReference', 'TextureResult', 'TextureRuntime',
+           'check_runtime', 'default_texture_reference', 'texture_mesh']
 
 
 @dataclass(frozen=True)
@@ -41,7 +45,7 @@ class TextureOptions:
 def _installed_trellis_checkout() -> Path:
     spec = importlib.util.find_spec('trellis2')
     if spec is None or spec.origin is None:
-        raise ImportError('Install TRELLIS.2 in the active Python environment before requesting textures')
+        raise ImportError('TRELLIS.2 is not installed. Run: patient-digital-twin setup texture')
     return Path(spec.origin).resolve().parent.parent
 
 
@@ -102,7 +106,7 @@ def texture_mesh(
     identity = check_runtime(runtime) if identity is None else identity
     config = dict(asdict(options), texture_square=str(reference.image),
                   trellis_root=str(Path(runtime.checkout).expanduser().resolve()),
-                  model='microsoft/TRELLIS.2-4B')
+                  model=MODEL)
     digest = hashlib.sha256(json.dumps([config, identity], sort_keys=True).encode())
     for array in (vertices, faces):
         digest.update(str((array.shape, array.dtype)).encode())
