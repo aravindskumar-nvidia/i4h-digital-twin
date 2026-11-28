@@ -10,7 +10,8 @@ uv pip install -e './patient-digital-twin[editing]'
 patient-digital-twin setup editing
 ```
 
-Authenticate Codex, then run (Blender starts automatically if needed):
+Read [Security](#security) first. Authenticate Codex, then run (Blender starts
+automatically if needed):
 
 ```bash
 patient-digital-twin-agent --backend codex \
@@ -25,16 +26,34 @@ private virtual desktop, add `--blender-mode virtual` (Ubuntu prerequisites:
 screenshots work; it is not Blender's background mode or a VNC server.
 
 Existing Blender must meet the pinned MCP's Blender 3.0+ requirement and support
-the USD options used by this workflow. If missing on Linux x86_64, installation of
-the verified official 5.1.2 archive requires Y/N confirmation, or
-`I4H_INSTALL_BLENDER=1` for non-interactive runs. It is installed under
-`$XDG_CACHE_HOME/i4h/blender` (default `~/.cache/i4h/blender`).
+the USD options used by this workflow. `patient-digital-twin setup editing` reuses it,
+or on Linux x86_64 installs the verified official 5.1.2 archive under
+`$XDG_CACHE_HOME/i4h/blender` (default `~/.cache/i4h/blender`). Editing never installs
+Blender itself; without one it stops and names the setup command.
 Set `BLENDER_EXECUTABLE` to select an installation; other platforms need Blender
 on PATH or this override. Managed startup is tested on Linux.
 The matching MCP server/add-on is pinned to 2.3.0.
 Only processes started by the command are closed on completion or failure;
 existing Blender sessions and preferences are left intact. `--blender-mode existing`
 disables installation/startup and is the default when using `--mcp-config`.
+
+## Security
+
+The agent edits through the Blender MCP tool `execute_blender_code`, which runs any
+Python the model writes inside Blender. That code runs as your user, with your
+permissions: it can read and write any file you can, use the network and start
+processes. The tool is approved automatically so sessions can run unattended.
+
+- Codex's `workspace_write` sandbox and `deny_all` approval apply only to Codex's
+  own shell and file tools. They do not contain Blender.
+- Claude gets no built-in tools; it can act only through the same Blender tools.
+- Prompts, anatomy references and the patient asset all shape what the model writes,
+  so treat each as trusted input.
+
+Run edits only with inputs you trust, preferably in a dedicated user account,
+container or virtual machine without access to credentials or data you need to protect.
+
+## Repairs and recovery
 
 Scene and output validation failures are returned to the agent for up to two repair attempts.
 Use `--max-repairs N` to change this (`0` disables repairs); the conversation, remaining

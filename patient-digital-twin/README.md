@@ -33,7 +33,8 @@ The `editing` extra includes the complete import/export pipeline, mesh processin
 and both Codex and Claude SDKs. `setup` reuses compatible Blender or installs the
 verified release on Linux x86_64, then finds it automatically on later runs.
 There is no need to set an executable path. Authenticate your chosen agent backend
-before editing. Other platforms need Blender installed separately.
+before editing. Other platforms need Blender installed separately. The agent runs the
+Python it writes inside Blender with your permissions; see [agent security](docs/agents.md#security).
 On headless Ubuntu, setup reports if `sudo apt install xvfb xauth` is needed.
 
 For **basic import/export only**, use `uv pip install -e './patient-digital-twin[pipeline]'`
@@ -54,9 +55,10 @@ uv pip install -e './patient-digital-twin[texture]'
 patient-digital-twin setup texture
 ```
 
-The `texture` extra includes the mesh and image dependencies. Setup installs and
-registers TRELLIS.2 automatically. It needs an NVIDIA GPU, CUDA development toolkit
-and C++ compiler; see [texture setup](docs/environment.md#texture-generation).
+Install a CUDA build of PyTorch first ([PyTorch](docs/environment.md#pytorch)). The
+`texture` extra installs TRELLIS.2's Python dependencies; setup builds its CUDA
+extensions at pinned commits. It needs an NVIDIA GPU, a matching CUDA toolkit and a
+C++ compiler; see [texture setup](docs/environment.md#texture-generation).
 
 Other input backends have separate setup:
 
@@ -253,7 +255,7 @@ for dependencies and model downloads.
 
 Use new output paths. Bundle patient IDs are derived automatically from the input
 folder (`geometry` for generated anatomy); no `--patient-id` option is needed.
-The CLI extracts missing centerlines for explicitly selected vessels.
+The CLI extracts centerlines for explicitly selected vessels.
 NV-Segment accepts 3D `.nii`/`.nii.gz`, DICOM CT, or `volume.yaml`;
 `--modality MR` supports geometry-only NIfTI USD.
 CLI bundle output requires CT. Named selections require at least one vessel;

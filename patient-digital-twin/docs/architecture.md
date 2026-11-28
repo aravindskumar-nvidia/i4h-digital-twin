@@ -11,12 +11,18 @@ walkthrough see the [quickstart](../README.md); for the exported USD layout see 
 | Module | Owns | Depends on |
 | --- | --- | --- |
 | [`anatomy.py`](../patient_digital_twin/anatomy.py) | `Kind`, `System`, `CATALOG`, `canonical_name`, `MeshGeometry`, `AnatomicalStructure`, `AnatomyCollection` | `geometry` |
-| [`body.py`](../patient_digital_twin/body.py) | `HumanBody`, `ImagingVolume` | `anatomy`, `geometry`, `scan_volume` (and `export` on demand) |
+| [`body.py`](../patient_digital_twin/body.py) | `HumanBody`, `ImagingVolume` | `anatomy`, `export`, `geometry`, `scan_volume` |
 | [`importers.py`](../patient_digital_twin/importers.py) | `SegmentationImporter`, `NVSegmentImporter`, `NVGenerateImporter`, `SimpleImporter` | `anatomy`, `geometry`, `scan_volume` |
 | [`geometry.py`](../patient_digital_twin/geometry.py) | `CenterlineGraph`, transforms, `mask_to_mesh`, `voxelize_mesh`, centerline extraction | NumPy, scikit-image, SciPy, VTK (lazy) |
 | [`export.py`](../patient_digital_twin/export.py) | `export_to_usd`, `export_patient_twin`, `write_artifacts` | `geometry`, OpenUSD (lazy) |
 | [`scan_volume.py`](../patient_digital_twin/scan_volume.py) | `ScanVolume`, `Conversion`, NIfTI/DICOM readers, `export_ct`, `replay` | NumPy, PyYAML, nibabel/SimpleITK (lazy) |
 | [`__main__.py`](../patient_digital_twin/__main__.py) | `run_pipeline`, the `python -m patient_digital_twin` CLI | `importers`, `body`, `scan_volume` |
+| [`workflow.py`](../patient_digital_twin/workflow.py) | `PatientWorkflow`: cleanup, optional agent edit and texturing around the exporters, resumable from a checkpoint | `surface`, `texturing`, `agent`, `export` |
+| [`surface.py`](../patient_digital_twin/surface.py) | `CleanupOptions`, `prepare_surface` | `geometry`, VTK and trimesh (lazy) |
+| [`references.py`](../patient_digital_twin/references.py) | The anatomy reference catalog: `resolve_references`, `load_references`, `write_reference_files` | `anatomy`, reference downloads |
+| [`texturing/`](../patient_digital_twin/texturing/) | `TextureReference` tiles, `texture_mesh`, and the TRELLIS.2 worker process | `anatomy`, `geometry` |
+| [`agent/`](../patient_digital_twin/agent/) | `AgentOptions` and `SessionOptions`; `session` runs one Blender session, `backends` the Claude/Codex loop, `assets` the USD handoff, `completion` reference reports, `prompts` every instruction, `runtime` the Blender process | `references`, OpenUSD, MCP and agent SDKs (lazy) |
+| [`setup.py`](../patient_digital_twin/setup.py) | `patient-digital-twin setup editing` and `setup texture` | `agent.runtime`, `_texture_setup` |
 
 `scan_volume.py` is shared byte-for-byte with sensor-simulation and is not edited here.
 The separate, deprecated `vasculature_digital_twin` package ships in the same distribution
@@ -94,8 +100,8 @@ classDiagram
   `local_to_world` is its current pose, which applications may change. Setting
   `enabled = False` hides the public `vertices`/`faces` without deleting `mesh`.
 - **`AnatomyCollection`** owns structures by canonical name and remembers where they came
-  from: `body_to_imaging` (body frame to the source image's RAS meters) and, for label
-  imports, the source label volume used later to build vessel masks on the CT grid.
+  from: `body_to_imaging` (body frame to the source image's RAS meters). Vessel masks on
+  the CT grid are rebuilt from the meshes at export.
   The `CATALOG` assigns each canonical name a `Kind` and its `System` memberships,
   which drive `select` and `set_system_enabled`.
 - **`HumanBody`** is the object applications use. It holds the anatomy and, once CT is
