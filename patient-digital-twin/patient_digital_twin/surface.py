@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic mesh cleanup, independent of patient workflows and agent SDKs."""
+"""Deterministic mesh cleanup, independent of patient workflows and agent SDKs.
+
+VTK and trimesh (the ``pipeline`` extra) are imported when cleanup runs, so importing
+the package does not require them.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +14,15 @@ from dataclasses import dataclass
 import numpy as np
 
 from .anatomy import MeshGeometry
-from .geometry import validate_triangles
+from .geometry import polydata_arrays, triangle_polydata, validate_triangles
+
+# Pass bands tried, in order, until smoothing keeps volume (or open-surface area) within 2%.
+_FALLBACK_PASS_BANDS = (.03, .1, .3, .8, 1.5, 2.)
 
 
 @dataclass(frozen=True)
 class CleanupOptions:
+    """Cleanup settings; zero disables hole filling, smoothing, and each fragment threshold."""
     smoothing_iterations: int = 60
     hole_radius_mm: float = 2.0
     min_component_area_mm2: float = 25.0
@@ -22,11 +30,13 @@ class CleanupOptions:
     max_component_distance_mm: float = 50.0
 
     def __post_init__(self):
-        validate_cleanup(smoothing_iterations=self.smoothing_iterations,
-                         hole_radius_mm=self.hole_radius_mm,
-                         min_component_area_mm2=self.min_component_area_mm2,
-                         smoothing_pass_band=self.smoothing_pass_band,
-                         max_component_distance_mm=self.max_component_distance_mm)
+        values = [self.smoothing_iterations, self.hole_radius_mm, self.min_component_area_mm2,
+                  self.smoothing_pass_band, self.max_component_distance_mm]
+        if (not np.isfinite(values).all() or min(values) < 0
+                or int(self.smoothing_iterations) != self.smoothing_iterations
+                or not 0 < self.smoothing_pass_band <= 2):
+            raise ValueError("Iterations/thresholds must be nonnegative and finite; "
+                             "smoothing pass band must be in (0, 2]")
 
 
 @dataclass(frozen=True)
@@ -35,23 +45,10 @@ class CleanupResult:
     measurements: dict
 
 
-def validate_cleanup(*, smoothing_iterations=60, hole_radius_mm=2., min_component_area_mm2=25.,
-                     smoothing_pass_band=.01, max_component_distance_mm=50.):
-    values = [smoothing_iterations, hole_radius_mm, min_component_area_mm2, smoothing_pass_band,
-              max_component_distance_mm]
-    if (not np.isfinite(values).all() or min(values) < 0
-            or int(smoothing_iterations) != smoothing_iterations or not 0 < smoothing_pass_band <= 2):
-        raise ValueError("Iterations/thresholds must be nonnegative and finite; smoothing pass band must be in (0, 2]")
-
-
 def _filter_components(source, options):
     """Keep the main surface and nearby significant fragments; record every decision."""
     import vtk
-    from vtk.util.numpy_support import (
-        numpy_to_vtk,
-        numpy_to_vtkIdTypeArray,
-        vtk_to_numpy,
-    )
+    from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
     parts = sorted(source.split(only_watertight=False, repair=False),
                    key=lambda part: (-part.area, tuple(part.bounds.ravel())))
@@ -75,16 +72,8 @@ def _filter_components(source, options):
         # Expand from the main surface through nearby fragments. Tiny removed islands
         # cannot act as stepping stones to retain otherwise distant false positives.
         def surface_distance(part):
-            points, cells, surface = vtk.vtkPoints(), vtk.vtkCellArray(), vtk.vtkPolyData()
-            points.SetData(numpy_to_vtk(np.asarray(part.vertices), deep=True))
-            cells.SetData(
-                numpy_to_vtkIdTypeArray(np.arange(0, 3 * (len(part.faces) + 1), 3, dtype=np.int64), deep=True),
-                numpy_to_vtkIdTypeArray(np.asarray(part.faces, dtype=np.int64).ravel(), deep=True),
-            )
-            surface.SetPoints(points)
-            surface.SetPolys(cells)
             distance = vtk.vtkImplicitPolyDataDistance()
-            distance.SetInput(surface)
+            distance.SetInput(triangle_polydata(part.vertices, part.faces))
             return distance
 
         def gap_mm(distance, part):
@@ -134,117 +123,102 @@ def _quality(mesh) -> dict:
     }
 
 
-def prepare_surface(mesh: MeshGeometry, options: CleanupOptions | None = None) -> CleanupResult:
-    """Return a repaired, smoothed local-meter mesh without modifying the input.
+def _fill_holes(surface, radius_mm: float):
+    import vtk
 
-    Keeps the largest component, removes tiny and distant secondary components,
-    and retains nearby fragments separately for agent review. Zero disables each
-    component threshold. Distance assumes one anatomical body: disable it for
-    structures that are several separate bodies by definition. VTK's hole radius bounds a boundary loop; it is not a gap-
-    bridging distance. No spline or connection between components is inferred.
-    Windowed-sinc smoothing suppresses voxel stepping with limited volume drift.
-    Lower pass bands remove more fine-scale variation. Returns before/after
-    topology and surface measurements. Run before applying textures.
+    repair = vtk.vtkFillHolesFilter()
+    repair.SetInputData(surface)
+    repair.SetHoleSize(radius_mm * 0.001)
+    repair.Update()
+    return repair.GetOutput()
+
+
+def _smooth(surface, options: CleanupOptions):
+    """Windowed-sinc smoothing at the requested pass band, backed off until the surface survives.
+
+    A densely meshed scan supports strong filtering; a coarse CAD cylinder with only two
+    vertex rings can collapse at that setting. Raising the pass band keeps such inputs
+    instead of silently destroying them. Returns the surface and the pass band used.
     """
     import trimesh
     import vtk
-    from vtk.util.numpy_support import (
-        numpy_to_vtk,
-        numpy_to_vtkIdTypeArray,
-        vtk_to_numpy,
-    )
+
+    vertices, faces = polydata_arrays(surface)
+    unsmoothed = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    baseline = abs(unsmoothed.volume) if unsmoothed.is_watertight else unsmoothed.area
+    smooth = vtk.vtkWindowedSincPolyDataFilter()
+    smooth.SetInputData(surface)
+    smooth.SetNumberOfIterations(options.smoothing_iterations)
+    smooth.NormalizeCoordinatesOn()
+    smooth.BoundarySmoothingOff()
+    smooth.FeatureEdgeSmoothingOff()
+    smooth.NonManifoldSmoothingOff()
+    requested = options.smoothing_pass_band
+    for pass_band in sorted({requested, *(max(requested, band) for band in _FALLBACK_PASS_BANDS)}):
+        smooth.SetPassBand(pass_band)
+        smooth.Update()
+        candidate = trimesh.Trimesh(vertices=polydata_arrays(smooth.GetOutput())[0], faces=faces, process=False)
+        measured = abs(candidate.volume) if unsmoothed.is_watertight else candidate.area
+        if (baseline > 0 and np.isfinite(candidate.vertices).all() and abs(measured / baseline - 1) <= .02
+                and np.all(candidate.area_faces > 0)):
+            return smooth.GetOutput(), pass_band
+    raise ValueError('Smoothing could not preserve the input surface; disable or reduce smoothing')
+
+
+def _repair(component, options: CleanupOptions):
+    """Fill small holes in and smooth one retained component; return it and its pass band."""
+    import trimesh
+
+    pass_band = options.smoothing_pass_band
+    if options.hole_radius_mm or options.smoothing_iterations:
+        surface = triangle_polydata(component.vertices, component.faces)
+        if options.hole_radius_mm:
+            surface = _fill_holes(surface, options.hole_radius_mm)
+        if options.smoothing_iterations:
+            surface, pass_band = _smooth(surface, options)
+        vertices, faces = polydata_arrays(surface)
+        component = trimesh.Trimesh(vertices=vertices, faces=faces, process=True, validate=True)
+    component.fix_normals(multibody=True)
+    return component, pass_band
+
+
+def prepare_surface(mesh: MeshGeometry, options: CleanupOptions | None = None) -> CleanupResult:
+    """Return a repaired, smoothed local-meter mesh without modifying the input.
+
+    Keeps the largest component, removes tiny and distant secondary components, and
+    retains nearby fragments separately for agent review. Distance assumes one anatomical
+    body: disable it for structures that are several separate bodies by definition.
+    VTK's hole radius bounds a boundary loop; it is not a gap-bridging distance. No spline
+    or connection between components is inferred. Windowed-sinc smoothing suppresses
+    voxel stepping with limited volume drift; lower pass bands remove more fine-scale
+    variation. Returns before/after topology and surface measurements. Run before
+    applying textures.
+    """
+    import trimesh
 
     options = options or CleanupOptions()
-    smoothing_iterations = options.smoothing_iterations
-    hole_radius_mm = options.hole_radius_mm
-    min_component_area_mm2 = options.min_component_area_mm2
-    effective_pass_band = options.smoothing_pass_band
-    validate_cleanup(smoothing_iterations=smoothing_iterations, hole_radius_mm=hole_radius_mm,
-                     min_component_area_mm2=min_component_area_mm2,
-                     smoothing_pass_band=options.smoothing_pass_band,
-                     max_component_distance_mm=options.max_component_distance_mm)
     if mesh.material is not None:
         raise ValueError("Prepare geometry before texturing")
     if mesh.vertices is None or mesh.faces is None:
         raise ValueError("Structure has no mesh")
     vertices, faces = validate_triangles(mesh.vertices, mesh.faces)
     source = trimesh.Trimesh(vertices=vertices, faces=faces, process=True, validate=True)
-    before = _quality(source)
     components, component_filter = _filter_components(source, options)
     prepared, pass_bands = [], []
-    for index, surface_mesh in enumerate(components):
-        effective_pass_band = options.smoothing_pass_band
-        if hole_radius_mm or smoothing_iterations:
-            points, cells, surface = vtk.vtkPoints(), vtk.vtkCellArray(), vtk.vtkPolyData()
-            points.SetData(numpy_to_vtk(np.asarray(surface_mesh.vertices), deep=True))
-            cells.SetData(
-                numpy_to_vtkIdTypeArray(np.arange(0, 3 * (len(surface_mesh.faces) + 1), 3, dtype=np.int64), deep=True),
-                numpy_to_vtkIdTypeArray(np.asarray(surface_mesh.faces, dtype=np.int64).ravel(), deep=True),
-            )
-            surface.SetPoints(points)
-            surface.SetPolys(cells)
-            result = surface
-            if hole_radius_mm:
-                repair = vtk.vtkFillHolesFilter()
-                repair.SetInputData(result)
-                repair.SetHoleSize(hole_radius_mm * 0.001)
-                repair.Update()
-                result = repair.GetOutput()
-            if smoothing_iterations:
-                unsmoothed = trimesh.Trimesh(
-                    vertices=vtk_to_numpy(result.GetPoints().GetData()),
-                    faces=vtk_to_numpy(result.GetPolys().GetConnectivityArray()).reshape(-1, 3),
-                    process=False,
-                )
-                smooth = vtk.vtkWindowedSincPolyDataFilter()
-                smooth.SetInputData(result)
-                smooth.SetNumberOfIterations(smoothing_iterations)
-                smooth.NormalizeCoordinatesOn()
-                smooth.BoundarySmoothingOff()
-                smooth.FeatureEdgeSmoothingOff()
-                smooth.NonManifoldSmoothingOff()
-                # A densely meshed scan supports strong filtering; a coarse CAD
-                # cylinder with only two vertex rings can collapse at that setting.
-                # Back off the frequency cutoff until volume (or open-surface area)
-                # stays within 2%, rather than silently destroying such inputs.
-                bands = sorted({options.smoothing_pass_band,
-                                *(max(options.smoothing_pass_band, band) for band in (.03, .1, .3, .8, 1.5, 2.))})
-                for effective_pass_band in bands:
-                    smooth.SetPassBand(effective_pass_band)
-                    smooth.Update()
-                    candidate = trimesh.Trimesh(
-                        vertices=vtk_to_numpy(smooth.GetOutput().GetPoints().GetData()),
-                        faces=unsmoothed.faces, process=False,
-                    )
-                    baseline = abs(unsmoothed.volume) if unsmoothed.is_watertight else unsmoothed.area
-                    measured = abs(candidate.volume) if unsmoothed.is_watertight else candidate.area
-                    if (baseline > 0 and np.isfinite(candidate.vertices).all()
-                            and abs(measured / baseline - 1) <= .02
-                            and np.all(candidate.area_faces > 0)):
-                        break
-                else:
-                    raise ValueError('Smoothing could not preserve the input surface; disable or reduce smoothing')
-                result = smooth.GetOutput()
-            surface_mesh = trimesh.Trimesh(
-                vertices=vtk_to_numpy(result.GetPoints().GetData()),
-                faces=vtk_to_numpy(result.GetPolys().GetConnectivityArray()).reshape(-1, 3),
-                process=True, validate=True,
-            )
-        surface_mesh.fix_normals(multibody=True)
-        prepared.append(surface_mesh)
-        pass_bands.append(effective_pass_band)
-        component_id = component_filter['retained_component_ids'][index]
-        component_filter['components'][component_id]['smoothing_pass_band'] = effective_pass_band
-    surface_mesh = trimesh.util.concatenate(prepared)
-    assert isinstance(surface_mesh, trimesh.Trimesh)
-    effective_pass_band = max(pass_bands)
-    report = {"before": before, "after": _quality(surface_mesh),
-              "smoothing_iterations": smoothing_iterations, "hole_radius_mm": hole_radius_mm,
-              "min_component_area_mm2": min_component_area_mm2,
+    for component_id, component in zip(component_filter['retained_component_ids'], components):
+        component, pass_band = _repair(component, options)
+        prepared.append(component)
+        pass_bands.append(pass_band)
+        component_filter['components'][component_id]['smoothing_pass_band'] = pass_band
+    surface = trimesh.util.concatenate(prepared)
+    assert isinstance(surface, trimesh.Trimesh)
+    report = {"before": _quality(source), "after": _quality(surface),
+              "smoothing_iterations": options.smoothing_iterations, "hole_radius_mm": options.hole_radius_mm,
+              "min_component_area_mm2": options.min_component_area_mm2,
               "max_component_distance_mm": options.max_component_distance_mm,
               "component_filter": component_filter,
-              "smoothing_algorithm": "windowed_sinc", "smoothing_pass_band": effective_pass_band,
+              "smoothing_algorithm": "windowed_sinc", "smoothing_pass_band": max(pass_bands),
               "requested_smoothing_pass_band": options.smoothing_pass_band}
-    geometry = MeshGeometry(np.asarray(surface_mesh.vertices), np.asarray(surface_mesh.faces),
-                            normals=np.asarray(surface_mesh.vertex_normals))
+    geometry = MeshGeometry(np.asarray(surface.vertices), np.asarray(surface.faces),
+                            normals=np.asarray(surface.vertex_normals))
     return CleanupResult(geometry, report)

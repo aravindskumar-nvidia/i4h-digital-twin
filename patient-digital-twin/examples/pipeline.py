@@ -16,18 +16,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
-import numpy as np
-from patient_digital_twin import HumanBody, SegmentationImporter
+from patient_digital_twin import HumanBody, SegmentationImporter, SimpleImporter
 from patient_digital_twin.__main__ import class_names
 from patient_digital_twin._refinement_cli import (
     add_refinement_arguments,
     pop_refinement_workflow,
 )
-from patient_digital_twin.importers import SimpleImporter
+from patient_digital_twin.export import publish_directory
+from patient_digital_twin.geometry import CENTERLINE_SPACING_M
 from patient_digital_twin.scan_volume import from_nifti
 
 SAMPLE = Path(__file__).parent / "data/s0011"
@@ -44,7 +42,7 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--ct", type=Path, help="Matching CT for --source segmentation")
     cli.add_argument("--output", type=Path, required=True, help="New bundle directory")
     cli.add_argument("--anatomy", nargs="*", default=[], help="Optional anatomy subset")
-    cli.add_argument("--centerline-spacing-mm", type=float, default=1.5)
+    cli.add_argument("--centerline-spacing-mm", type=float, default=CENTERLINE_SPACING_M * 1000)
     add_refinement_arguments(cli)
     return cli
 
@@ -80,8 +78,6 @@ def run(args: argparse.Namespace) -> Path:
     if output.exists():
         raise FileExistsError(f"Use a new output directory: {output}")
     selected = set(class_names(args.anatomy)) if args.anatomy else set()
-    if not np.isfinite(args.centerline_spacing_mm) or args.centerline_spacing_mm <= 0:
-        raise ValueError("Centerline spacing must be positive and finite")
     if (args.source == "sample") == (args.input is not None):
         raise ValueError("--input is required for segmentation/simple and not accepted for sample")
     if (args.source == "segmentation") != (args.ct is not None):
@@ -89,36 +85,28 @@ def run(args: argparse.Namespace) -> Path:
     workflow = pop_refinement_workflow(vars(args).copy())
     print(f"Importing {args.source}", flush=True)
     body = import_body(args)
-    requested = selected or set(body.anatomy.structures)
-    available = {
-        name
-        for name in requested
-        if name in body.anatomy.structures
-        and body.anatomy.structures[name].mesh.vertices is not None
-    }
-    if not available:
-        raise ValueError("No meshes for the requested anatomy")
+    structures = body.anatomy.structures
+    requested = selected or set(structures)
+    if missing := sorted(name for name in requested if name not in structures or structures[name].is_empty):
+        raise ValueError(f"No meshes for the requested anatomy: {missing}")
+    for name in list(structures):
+        if name not in requested:
+            del structures[name]
     if workflow is not None:
-        for name in list(body.anatomy.structures):
-            if name not in requested:
-                del body.anatomy.structures[name]
-        result = workflow.run(body, output, format='bundle', topology_names=available,
+        result = workflow.run(body, output, format='bundle', topology_names=sorted(requested),
                               centerline_spacing_mm=args.centerline_spacing_mm)
         print(result, flush=True)
         return result
     print("Extracting topology", flush=True)
-    body.extract_topology(names=available, spacing_m=args.centerline_spacing_mm / 1000)
-    for name in list(body.anatomy.structures):
-        if name not in requested:
-            del body.anatomy.structures[name]
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(dir=output.parent, prefix=".pipeline-") as temporary:
-        folder = Path(temporary) / "bundle"
+    body.extract_topology(names=requested, spacing_m=args.centerline_spacing_mm / 1000)
+
+    def write(folder: Path) -> None:
         body.export_patient_twin(folder)
         body.export_to_usd(folder / "human_body.usdc")
-        shutil.move(str(folder), str(output))
-    print(output / "patient_twin.yaml", flush=True)
-    return output / "patient_twin.yaml"
+
+    result = publish_directory(output, ".pipeline-", write) / "patient_twin.yaml"
+    print(result, flush=True)
+    return result
 
 
 if __name__ == "__main__":

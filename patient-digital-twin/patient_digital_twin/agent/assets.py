@@ -19,7 +19,7 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, Vt
 
 from ..anatomy import Kind, MeshGeometry, is_vessel
 from ..body import HumanBody
-from ..export import _publish
+from ..export import publish_directory
 from ..geometry import (
     CenterlineGraph,
     centerline_spacing,
@@ -169,7 +169,7 @@ def finalize(workspace: Path, output: Path, *, vessel_names: list[str] | None = 
         if not reopened or str(reopened.GetDefaultPrim().GetPath()) != '/HumanBody':
             raise ValueError('Final USD failed to reopen')
 
-    result = _publish(output, '.edited-patient-', write)
+    result = publish_directory(output, '.edited-patient-', write)
     return result / ('patient_twin.yaml' if manifest is not None else source.name)
 
 

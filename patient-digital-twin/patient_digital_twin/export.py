@@ -136,7 +136,7 @@ def _write_scan(scan: ScanVolume, folder: Path, vessel_mask: ArrayLike | None = 
     return paths
 
 
-def _publish(output: str | Path, prefix: str, write: Callable[[Path], Any]) -> Path:
+def publish_directory(output: str | Path, prefix: str, write: Callable[[Path], Any]) -> Path:
     """Run write(folder) in a sibling staging folder, then rename it to a new output path.
 
     The rename fails if anything has appeared at the output meanwhile, so concurrent
@@ -172,7 +172,7 @@ def publish_usd(staged: Path, output: Path) -> Path:
             if attr.GetTypeName() == Sdf.ValueTypeNames.Asset and attr.Get():
                 attr.Set(Sdf.AssetPath(sidecar.name + "/" + attr.Get().path))
     stage.GetRootLayer().Save()
-    _publish(sidecar, ".patient-assets-",
+    publish_directory(sidecar, ".patient-assets-",
              lambda folder: shutil.copytree(staged.parent, folder, ignore=shutil.ignore_patterns(staged.name)))
     try:
         with TemporaryDirectory(dir=output.parent, prefix=".patient-usd-") as temporary:
@@ -196,7 +196,7 @@ def write_artifacts(scan: ScanVolume, output: str | Path, *, vessel_mask: ArrayL
     Returns:
         The output directory.
     """
-    return _publish(output, ".ct-artifacts-", lambda folder: _write_scan(scan, folder, vessel_mask))
+    return publish_directory(output, ".ct-artifacts-", lambda folder: _write_scan(scan, folder, vessel_mask))
 
 
 def _vessel_mask(body: HumanBody, scan: ScanVolume, body_to_imaging: NDArray[np.floating],
@@ -461,4 +461,4 @@ def export_patient_twin(
             manifest["transforms"]["world_from_patient_m"] = rigid_transform(world_from_patient_m).tolist()
         (folder / "patient_twin.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))
 
-    return _publish(output, ".patient-twin-", write) / "patient_twin.yaml"
+    return publish_directory(output, ".patient-twin-", write) / "patient_twin.yaml"
