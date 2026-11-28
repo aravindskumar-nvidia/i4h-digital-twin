@@ -130,8 +130,8 @@ repairs. Claude accepts `budget_usd` and `max_turns`; Codex accepts `token_budge
 ## Saved repair guidance
 
 The SDK combines your `--agent-prompt` with saved Blender instructions in
-`agent/__main__.py` (`INSTRUCTIONS`). When you supply anatomy references,
-`refinement.py` adds the applicable repair guidance:
+`agent/backends.py` (`INSTRUCTIONS`). When you supply anatomy references,
+`agent/prompts.py` adds the applicable repair guidance:
 
 | Target | Saved guidance |
 | --- | --- |
@@ -184,7 +184,7 @@ and DINOv3 conditioning. See [backend setup](environment.md#texture-generation).
 ```python
 from pathlib import Path
 from patient_digital_twin import PatientWorkflow, TextureRuntime
-from patient_digital_twin.references import default_texture_reference
+from patient_digital_twin.texturing import default_texture_reference
 
 workflow = PatientWorkflow(
     textures={"aorta": default_texture_reference("aorta")},
@@ -241,8 +241,8 @@ python -m patient_digital_twin \
   `--agent-timeout`, `--token-budget`, `--budget-usd`, `--max-turns`, and
   `--max-repairs` control the session. Backend-specific budgets are validated.
 - Repeat `--anatomy-reference ORGAN=REFERENCE` for shape references. `REFERENCE` is an ID from
-  `assets/anatomy/catalog.json`, `CATALOG.json#ID` for another catalog, or the path of a
-  standalone reference `metadata.json`. Earlier `assets/anatomy/.../metadata.json` paths still resolve.
+  the [packaged catalog](anatomy-references.md), `CATALOG.json#ID` for another catalog, or the
+  path of a standalone reference `metadata.json`.
 - `--default-textures`: enable GPU texturing with TRELLIS.2 installed in the active environment.
 - Repeat `--texture ORGAN=METADATA_JSON` for tile overrides. These JSON files
   describe reference assets; they do not configure the workflow.

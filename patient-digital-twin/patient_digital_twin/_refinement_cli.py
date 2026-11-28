@@ -6,27 +6,22 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .agent import AgentOptions
-from .references import TextureReference, parse_references
+from .agent import BACKENDS, BLENDER_MODES, AgentOptions
+from .agent.prompts import TASKS
+from .references import load_catalog, parse_references
 from .surface import CleanupOptions
-from .texturing import TextureOptions, TextureRuntime
+from .texturing import TextureOptions, TextureReference, TextureRuntime
 from .workflow import PatientWorkflow
 
-# None distinguishes an omitted flag from a request for the refinement path.
-_FIELDS = {
-    'cleanup': None, 'smoothing_iterations': None, 'smoothing_pass_band': None,
-    'hole_radius_mm': None, 'min_component_area_mm2': None, 'max_component_distance_mm': None,
-    'agent_task': None, 'agent_target': None,
-    'agent_prompt': None, 'agent_backend': None, 'agent_model': None,
-    'agent_timeout': None, 'token_budget': None, 'budget_usd': None,
-    'max_turns': None, 'max_repairs': None, 'blender_mode': None,
-    'anatomy_reference': None, 'include_major_branches': None, 'fragment_area_mm2': None,
-    'texture': None,
-    'texture_timeout': None, 'default_textures': None, 'missing_texture': None,
-    'texture_seed': None, 'texture_resolution': None, 'texture_size': None,
-    'texture_steps': None, 'texture_roughness': None, 'match_reference_color': None,
-    'workspace': None,
-}
+# Every refinement flag. An omitted flag is absent (None), unlike an explicit value.
+_FIELDS = (
+    'cleanup', 'smoothing_iterations', 'smoothing_pass_band', 'hole_radius_mm', 'min_component_area_mm2',
+    'max_component_distance_mm', 'agent_task', 'agent_target', 'agent_prompt', 'agent_backend', 'agent_model',
+    'agent_timeout', 'token_budget', 'budget_usd', 'max_turns', 'max_repairs', 'blender_mode',
+    'anatomy_reference', 'include_major_branches', 'fragment_area_mm2', 'texture', 'texture_timeout',
+    'default_textures', 'missing_texture', 'texture_seed', 'texture_resolution', 'texture_size',
+    'texture_steps', 'texture_roughness', 'match_reference_color', 'workspace',
+)
 
 
 def add_refinement_arguments(parser: argparse.ArgumentParser) -> None:
@@ -39,19 +34,19 @@ def add_refinement_arguments(parser: argparse.ArgumentParser) -> None:
                          help='Minimum secondary-fragment surface area (default: 25 mm^2; 0 disables)')
     cleanup.add_argument('--max-component-distance-mm', type=float,
                          help='Maximum surface gap for retaining a fragment (default: 50 mm; 0 disables)')
-    agent = parser.add_argument_group('Optional SDK agent editing')
-    from .agent.prompts import TASKS
+    agent = parser.add_argument_group('Optional agent editing (runs agent-written Python in Blender; '
+                                      'see docs/agents.md#security)')
     agent.add_argument('--agent-task', choices=TASKS, help='Named operation; no verbal prompt required')
     agent.add_argument('--agent-target', nargs='+', help='Structure names to edit; defaults to reference targets')
     agent.add_argument('--agent-prompt', help='Enable agent editing with these instructions')
-    agent.add_argument('--agent-backend', choices=['codex', 'claude'])
+    agent.add_argument('--agent-backend', choices=BACKENDS)
     agent.add_argument('--agent-model')
     agent.add_argument('--agent-timeout', type=float, help='Seconds per agent session (default: 900)')
     agent.add_argument('--token-budget', type=int, help='Codex token budget (default: 100000)')
     agent.add_argument('--budget-usd', type=float, help='Claude dollar budget (default: 5)')
     agent.add_argument('--max-turns', type=int, help='Claude turn limit (default: 30)')
     agent.add_argument('--max-repairs', type=int)
-    agent.add_argument('--blender-mode', choices=['auto', 'virtual', 'existing'])
+    agent.add_argument('--blender-mode', choices=BLENDER_MODES)
     agent.add_argument('--anatomy-reference', action='append', metavar='ORGAN=REFERENCE',
                        help='Catalog ID, CATALOG.json#ID, or a reference metadata JSON path')
     agent.add_argument('--major-branching', dest='include_major_branches', action='store_true', default=False,
@@ -76,7 +71,7 @@ def add_refinement_arguments(parser: argparse.ArgumentParser) -> None:
 
 def pop_refinement_workflow(options: dict) -> PatientWorkflow | None:
     """Consume CLI-only keys; leave importer/exporter arguments in options."""
-    values = {key: options.pop(key, default) for key, default in _FIELDS.items()}
+    values = {key: options.pop(key, None) for key in _FIELDS}
     if all(value is None for value in values.values()):
         return None
     agent_fields = {
@@ -90,13 +85,11 @@ def pop_refinement_workflow(options: dict) -> PatientWorkflow | None:
     if (agent_values or values['anatomy_reference']) and not (values['agent_prompt'] or values['agent_task']):
         raise ValueError('Agent options require --agent-task or --agent-prompt')
     if values['anatomy_reference']:
-        from .references import default_catalog, load_catalog
-        catalog = default_catalog()
-        known = load_catalog(catalog)['references'] if catalog.is_file() else {}
+        known = load_catalog()['references']
         # Catalog IDs stay as written; files are made absolute for later resume.
         agent_values['anatomy_references'] = {
-            name: path if path in known else Path(path).expanduser().resolve()
-            for name, path in parse_references(values['anatomy_reference']).items()
+            name: reference if reference in known else str(Path(reference).expanduser().resolve())
+            for name, reference in parse_references(values['anatomy_reference']).items()
         }
     if values['agent_task'] == 'texture' and (values['cleanup'] is True or
             any(values[key] is not None for key in ('smoothing_iterations', 'smoothing_pass_band',
@@ -116,8 +109,7 @@ def pop_refinement_workflow(options: dict) -> PatientWorkflow | None:
     if texture_requested and values['agent_task'] == 'texture':
         raise ValueError('Run texture generation before a texture-only agent edit; later generation would overwrite it')
     if texture_requested:
-        runtime_options = {} if values['texture_timeout'] is None else {'timeout_s': values['texture_timeout']}
-        runtime = TextureRuntime(**runtime_options)
+        runtime = TextureRuntime(**({} if values['texture_timeout'] is None else {'timeout_s': values['texture_timeout']}))
     texture_fields = {'texture_seed': 'seed', 'texture_resolution': 'resolution',
                       'texture_size': 'texture_size', 'texture_steps': 'steps',
                       'texture_roughness': 'roughness', 'match_reference_color': 'match_reference_color'}
@@ -130,6 +122,6 @@ def pop_refinement_workflow(options: dict) -> PatientWorkflow | None:
         texture_runtime=runtime,
         texture_options=TextureOptions(**{field: values[key] for key, field in texture_fields.items()
                                           if values[key] is not None}),
-        default_textures=values['default_textures'] if values['default_textures'] is not None else True,
-        missing_texture=values['missing_texture'] or 'retain', workspace=values['workspace'],
+        workspace=values['workspace'],
+        **{key: values[key] for key in ('default_textures', 'missing_texture') if values[key] is not None},
     )

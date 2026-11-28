@@ -5,6 +5,10 @@ tissue texture squares.
 
 ## Files
 
+These ship with the package in
+[`patient_digital_twin/data/anatomy/`](../patient_digital_twin/data/anatomy/), so catalog
+IDs work from any install:
+
 | File | Contents |
 | --- | --- |
 | `catalog.json` | Every reference definition: shared source metadata and one entry per reference |
@@ -12,7 +16,7 @@ tissue texture squares.
 | `provenance/hra-library.yaml` | Source record and supplied citations for the HRA library |
 | `provenance/voxel-man-record.json` | Source record for the VOXEL-MAN dataset |
 
-No model, attribution, or per-reference metadata file is stored here. They are generated
+No model, attribution, or per-reference metadata file is stored there. They are generated
 when a reference is prepared for editing and are carried into exported assets.
 
 ## Catalog entries
@@ -30,12 +34,9 @@ Select a reference by ID:
 --anatomy-reference colon=voxel-man-colon-male-15882019
 ```
 
-`--anatomy-reference` also accepts `CATALOG.json#ID` for another catalog file and the
-path of a standalone reference `metadata.json` with its GLB, license, source evidence and
-`ATTRIBUTION.txt` beside it. Paths used before consolidation, such as
-`assets/anatomy/voxel-man/colon-male-15882019/metadata.json`, still resolve to the same
-entry, so saved commands and pipeline checkpoints keep working. IDs are looked up in this
-catalog; set `I4H_ANATOMY_CATALOG` to use another catalog for IDs.
+`--anatomy-reference` also accepts `CATALOG.json#ID` for an entry of another catalog file,
+and the path of a standalone reference `metadata.json` with its GLB, license, source
+evidence and `ATTRIBUTION.txt` beside it.
 
 ## Catalog format
 
@@ -92,7 +93,7 @@ The default cache is `$XDG_CACHE_HOME/i4h/references`, falling back to
 `load_references(..., cache=path)` also accepts an explicit cache location.
 A first VOXEL-MAN request downloads approximately 395 MB. Both organs reuse that
 archive. Generated assets are keyed by recipe, selected labels, and converter
-versions; consolidation did not change those keys, so existing caches remain valid.
+versions.
 Completed cache entries work offline and are checksum-verified on reuse.
 Partial downloads and conversions are never treated as complete.
 Downloads retry transient failures up to three times and validate byte ranges

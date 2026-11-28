@@ -28,9 +28,10 @@ def test_download_cache_and_failed_checksum(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='Downloaded reference checksum'):
         assets._download(bad, tmp_path, '.glb')
     assert list((tmp_path / 'downloads').iterdir()) == [first]
+    # A corrupt cache entry is replaced, not reported on every run.
     first.write_bytes(b'corrupt')
-    with pytest.raises(ValueError, match='Cached reference checksum'):
-        assets._download(source, tmp_path, '.glb')
+    assert assets._download(source, tmp_path, '.glb') == first
+    assert first.read_bytes() == data and len(calls) == 3
 
 
 def test_interrupted_download_is_retryable(tmp_path, monkeypatch):
@@ -70,7 +71,7 @@ def test_transient_download_retries_alternate_pinned_source(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('wrong_range', [False, True])
-def test_known_size_archive_ranges_are_validated_and_reassembled(tmp_path, monkeypatch, wrong_range):
+def test_known_size_archive_ranges_are_reassembled_or_streamed(tmp_path, monkeypatch, wrong_range):
     data = b'archive split across several ranges'
     source = {'url': 'https://example.org/source.zip', 'size_bytes': len(data),
               'checksum': 'sha256:' + hashlib.sha256(data).hexdigest()}
@@ -78,6 +79,9 @@ def test_known_size_archive_ranges_are_validated_and_reassembled(tmp_path, monke
     class Response(io.BytesIO):
         status = 206
     def download(request, **kwargs):
+        if request.get_header('Range') is None:
+            calls.append('stream')
+            return io.BytesIO(data)
         start, end = map(int, request.get_header('Range').removeprefix('bytes=').split('-'))
         calls.append((start, end))
         response = Response(data[start:end + 1])
@@ -86,13 +90,12 @@ def test_known_size_archive_ranges_are_validated_and_reassembled(tmp_path, monke
         return response
     monkeypatch.setattr(assets, '_RANGE_CHUNK_BYTES', 4)
     monkeypatch.setattr(assets.urllib.request, 'urlopen', download)
+    result = assets._download(source, tmp_path, '.zip')
+    assert result.read_bytes() == data
     if wrong_range:
-        with pytest.raises(ValueError, match='unexpected byte range'):
-            assets._download(source, tmp_path, '.zip')
-        assert not list((tmp_path / 'downloads').iterdir())
+        # A server that ignores Range is downloaded as one stream.
+        assert calls[-1] == 'stream'
     else:
-        result = assets._download(source, tmp_path, '.zip')
-        assert result.read_bytes() == data
         assert sorted(calls) == [(i, min(i + 4, len(data)) - 1) for i in range(0, len(data), 4)]
 
 

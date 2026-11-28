@@ -5,8 +5,8 @@
 
 ``python -m patient_digital_twin --source nvsegment --input ct.nii.gz --classes aorta
 --bundle-root <bundle> --format bundle --output out/`` segments a CT (NIfTI, DICOM
-directory, or ``volume.yaml``), meshes only the requested classes, extracts missing
-vessel centerlines, attaches the CT, and writes a USD file or a schema-2 bundle.
+directory, or ``volume.yaml``), meshes only the requested classes, extracts vessel
+centerlines, attaches the CT, and writes a USD file or a schema-2 bundle.
 ``--source nvgenerate`` synthesizes the CT instead. Run with ``--help`` for all options.
 
 Main functions:
@@ -27,12 +27,16 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from . import scan_volume
 from ._refinement_cli import add_refinement_arguments, pop_refinement_workflow
+from .agent import BLENDER_MODES
 from .anatomy import CATALOG, canonical_name, is_vessel
 from .body import HumanBody
 from .export import USD_SUFFIXES
+from .geometry import CENTERLINE_SPACING_M
 from .importers import NVGenerateImporter, NVSegmentImporter
 from .scan_volume import ScanVolume
+from .setup import main as setup_main
 from .workflow import PatientWorkflow
 
 
@@ -53,8 +57,6 @@ def class_names(values: str | Iterable[str]) -> tuple[str, ...]:
 
 def _load_scan(input: Path, series_uid: str | None) -> ScanVolume:
     """Read a DICOM directory (LPS mm), ``volume.yaml`` artifact, or NIfTI as a native ScanVolume."""
-    from . import scan_volume
-
     if input.is_dir():
         conversion = scan_volume.Conversion(world_frame="LPS", world_unit="mm")
         return scan_volume.from_dicom(input, series_uid=series_uid, conversion=conversion)
@@ -75,7 +77,7 @@ def run_pipeline(
     modality: str = "CT",
     bundle_root: str | Path | None = None,
     source_root: str | Path | None = None,
-    centerline_spacing_mm: float = 1.5,
+    centerline_spacing_mm: float = CENTERLINE_SPACING_M * 1000,
     series_uid: str | None = None,
     workflow: PatientWorkflow | None = None,
 ) -> Path:
@@ -153,8 +155,8 @@ def run_pipeline(
         return workflow.run(body, output, format=format, vessel_names=vessel_names,
                             centerline_spacing_mm=centerline_spacing_mm,
                             ct_exterior=format == 'bundle')
-    if missing := [n for n in vessel_names if body.anatomy.structures[n].centerline is None]:
-        body.extract_topology(names=missing, spacing_m=centerline_spacing_mm * 0.001)
+    if vessel_names:
+        body.extract_topology(names=vessel_names, spacing_m=centerline_spacing_mm * 0.001)
     if format == "bundle":
         return body.export_patient_twin(output, vessel_names=vessel_names, ct_exterior=True)
     return body.export_to_usd(output)
@@ -173,7 +175,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--modality", choices=("CT", "MR"), default="CT")
     result.add_argument("--bundle-root", type=Path, help="Inner NV-Segment-CTMR bundle directory")
     result.add_argument("--source-root", type=Path, help="NV-Generate-CTMR checkout")
-    result.add_argument("--centerline-spacing-mm", type=float, default=1.5)
+    result.add_argument("--centerline-spacing-mm", type=float, default=CENTERLINE_SPACING_M * 1000)
     add_refinement_arguments(result)
     return result
 
@@ -182,7 +184,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point: run the pipeline and print the output path; option errors exit with status 2."""
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == 'setup':
-        from .setup import main as setup_main
         return setup_main(argv[1:])
     if argv and argv[0] == 'resume':
         resume = argparse.ArgumentParser(description='Resume the full patient pipeline from its checkpoint')
@@ -190,8 +191,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         resume.add_argument('--output', type=Path)
         resume.add_argument('--edited-asset', type=Path, help='Already published editor USD to continue from')
         resume.add_argument('--token-budget', type=int)
-        resume.add_argument('--blender-mode', choices=['auto', 'virtual', 'existing'])
-        print(PatientWorkflow.resume(**vars(resume.parse_args(argv[1:]))))
+        resume.add_argument('--blender-mode', choices=BLENDER_MODES)
+        args = resume.parse_args(argv[1:])
+        overrides = {key: value for key, value in (('token_budget', args.token_budget),
+                                                   ('blender_mode', args.blender_mode)) if value is not None}
+        print(PatientWorkflow.resume(args.workspace, output=args.output, edited_asset=args.edited_asset,
+                                     agent_overrides=overrides))
         return 0
     cli = parser()
     try:

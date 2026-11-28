@@ -55,7 +55,8 @@ def test_worker_conditions_on_tile_and_preserves_uv_vertex_mapping(tmp_path, mon
     tile = Image.new('RGB', (8, 8), (180, 100, 90))
     tile.save(tmp_path / 'tile.png')
     config = dict(trellis_root=str(tmp_path), model='microsoft/TRELLIS.2-4B', seed=42,
-                  texture_square=str(tmp_path / 'tile.png'), resolution=640, steps=12, texture_size=64)
+                  texture_square=str(tmp_path / 'tile.png'), resolution=640, steps=12, texture_size=64,
+                  match_reference_color=True)
     (tmp_path / 'config.json').write_text(json.dumps(config))
 
     class Atlas:

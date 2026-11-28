@@ -23,6 +23,7 @@ from patient_digital_twin import (
     workflow,
 )
 from patient_digital_twin.agent import __main__ as agent_cli
+from patient_digital_twin.agent import session
 from patient_digital_twin.scan_volume import from_array
 from pxr import Sdf, Usd, UsdGeom
 
@@ -114,11 +115,11 @@ def test_cleanup_history_reaches_immediate_and_later_agents(body, fragmented_sur
 
     body.anatomy.structures['liver'].mesh = fragmented_surface
     captures = []
-    def edit(args, workspace, settings, output):
+    def edit(workspace, settings, output, options, **kwargs):
         captures.append(settings['cleanup_components'])
         output.mkdir()
         shutil.copy2(workspace / 'input.usdc', output / 'input.usdc')
-    monkeypatch.setattr(agent_cli, '_run_blender', edit)
+    monkeypatch.setattr(session, 'run', edit)
     result = PatientWorkflow(
         cleanup=CleanupOptions(smoothing_iterations=0, hole_radius_mm=0),
         agent=AgentOptions(task='refine', targets=('liver',)),
@@ -137,7 +138,7 @@ def test_cleanup_history_reaches_immediate_and_later_agents(body, fragmented_sur
 def test_default_workflow_never_starts_agent(body, tmp_path, monkeypatch, format):
     def unexpected(*args, **kwargs):
         pytest.fail('Default workflow started an agent')
-    monkeypatch.setattr(agent_cli, 'edit_asset', unexpected)
+    monkeypatch.setattr(session, 'edit_asset', unexpected)
     target = tmp_path / ('patient.usdc' if format == 'usd' else 'bundle')
     output = PatientWorkflow().run(body, target, format=format)
     assert output.is_file()
@@ -183,10 +184,10 @@ def test_agent_precedes_texturing_and_output_is_portable(body, tmp_path, monkeyp
         geometry = MeshGeometry(mesh.vertices, mesh.faces, np.zeros((len(mesh.vertices), 2)), None, material)
         return TextureResult(geometry, np.arange(len(mesh.vertices)), tmp_path, {'surface': 'serosa'})
 
-    monkeypatch.setattr(agent_cli, 'edit_asset', edit)
+    monkeypatch.setattr(session, 'edit_asset', edit)
     monkeypatch.setattr(workflow, 'texture_mesh', texture)
     target = tmp_path / ('patient.usdc' if format == 'usd' else 'bundle')
-    output = PatientWorkflow(cleanup=None, agent=AgentOptions('refine', token_budget=1234), textures={'liver': reference},
+    output = PatientWorkflow(cleanup=None, agent=AgentOptions(prompt='refine', token_budget=1234), textures={'liver': reference},
                              texture_runtime=TextureRuntime(tmp_path)).run(body, target, format=format)
     assert events == ['agent', 'texture']
     assert published[0][0].read_bytes() == published[0][1]
@@ -254,7 +255,7 @@ def test_reference_completion_validation_and_provenance(body, tmp_path):
     import shutil
 
     from patient_digital_twin.agent.assets import finalize, prepare
-    from patient_digital_twin.refinement import prepare_references
+    from patient_digital_twin.agent.completion import prepare_references
 
     reference = tmp_path / 'reference'
     reference.mkdir()
@@ -382,8 +383,8 @@ def test_navigation_is_derived_from_agent_edited_geometry(tmp_path, monkeypatch)
         stage.Export(str(output / 'input.usdc'))
         return output / 'input.usdc'
 
-    monkeypatch.setattr(agent_cli, 'edit_asset', edit)
-    output = PatientWorkflow(cleanup=None, agent=AgentOptions('shift')).run(
+    monkeypatch.setattr(session, 'edit_asset', edit)
+    output = PatientWorkflow(cleanup=None, agent=AgentOptions(prompt='shift')).run(
         patient, tmp_path / 'bundle', format='bundle', vessel_names=['aorta'])
     manifest = yaml.safe_load(output.read_text())
     mask = np.load(output.parent / manifest['artifacts']['vessel_mask'])
@@ -438,7 +439,7 @@ def test_cleanup_can_be_explicitly_disabled_with_flags():
 
 def test_colon_shape_gate_rejects_connected_surface_with_handles(tmp_path):
     import trimesh
-    from patient_digital_twin.refinement import validate_completion
+    from patient_digital_twin.agent.completion import validate_completion
 
     stage = Usd.Stage.CreateInMemory()
     mesh = UsdGeom.Mesh.Define(stage, '/HumanBody/Anatomy/colon')
@@ -471,7 +472,7 @@ def test_strong_cleanup_does_not_collapse_coarse_mesh():
 
 def test_packaged_texture_defaults():
     from patient_digital_twin.anatomy import CATALOG
-    from patient_digital_twin.references import default_texture_reference
+    from patient_digital_twin.texturing import default_texture_reference
     for name in (*CATALOG, 'bladder', 'left kidney', 'right kidney'):
         reference = default_texture_reference(name)
         reference.validate()
@@ -510,7 +511,7 @@ def test_workflow_resolves_texture_defaults(body, tmp_path, monkeypatch, mode):
 
 def test_tissue_family_defaults_are_explicit_and_preserve_exact_overrides():
     from patient_digital_twin.anatomy import CATALOG
-    from patient_digital_twin.references import default_texture_reference
+    from patient_digital_twin.texturing import default_texture_reference
     from PIL import Image
 
     examples = {'lung_upper_lobe_right': 'lung', 'atrial_appendage_left': 'heart',
@@ -537,7 +538,7 @@ def test_tissue_family_defaults_are_explicit_and_preserve_exact_overrides():
 
 
 def test_retain_missing_texture_does_not_hide_checksum_errors(body, tmp_path, monkeypatch):
-    from patient_digital_twin.references import MissingTextureDefault
+    from patient_digital_twin.texturing import MissingTextureDefault
     def missing(name):
         raise MissingTextureDefault(name)
     monkeypatch.setattr(workflow, 'default_texture_reference', missing)
@@ -577,9 +578,9 @@ def test_pipeline_resume_continues_textures_and_export_without_reediting(body, t
             raise RuntimeError('GPU interrupted')
         return TextureResult(mesh, np.arange(len(mesh.vertices)), tmp_path, {'completed': True})
     monkeypatch.setattr(workflow, 'prepare_surface', clean)
-    monkeypatch.setattr(agent_cli, 'edit_asset', edit)
+    monkeypatch.setattr(session, 'edit_asset', edit)
     monkeypatch.setattr(workflow, 'texture_mesh', texture)
-    pipeline = PatientWorkflow(agent=AgentOptions('Edit'), texture_runtime=TextureRuntime(tmp_path),
+    pipeline = PatientWorkflow(agent=AgentOptions(prompt='Edit'), texture_runtime=TextureRuntime(tmp_path),
                                workspace=tmp_path / 'work')
     with pytest.raises(RuntimeError, match='GPU interrupted'):
         pipeline.run(body, tmp_path / 'bundle', format='bundle', patient_id='resume-test')
@@ -607,13 +608,13 @@ def test_pipeline_resume_after_agent_failure_runs_remaining_pipeline(body, tmp_p
         output.mkdir()
         shutil.copy2(workspace.parent / 'input.usdc', output / 'input.usdc')
         return output / 'input.usdc'
-    monkeypatch.setattr(agent_cli, 'edit_asset', interrupted)
-    monkeypatch.setattr(agent_cli, 'resume_asset', resumed)
-    run_options = PatientWorkflow(cleanup=None, agent=AgentOptions('Edit'), workspace=tmp_path / 'work')
+    monkeypatch.setattr(session, 'edit_asset', interrupted)
+    monkeypatch.setattr(session, 'resume_asset', resumed)
+    run_options = PatientWorkflow(cleanup=None, agent=AgentOptions(prompt='Edit'), workspace=tmp_path / 'work')
     with pytest.raises(RuntimeError, match='token budget'):
         run_options.run(body, tmp_path / 'patient.usdc')
     run = next((tmp_path / 'work').glob('run-*'))
-    result = PatientWorkflow.resume(run, token_budget=200000, blender_mode='virtual')
+    result = PatientWorkflow.resume(run, agent_overrides=dict(token_budget=200000, blender_mode='virtual'))
     assert result.is_file()
     assert json.loads((run / 'pipeline.json').read_text())['stage'] == 'complete'
 
@@ -632,7 +633,7 @@ def test_editor_resume_routes_back_to_parent_pipeline(tmp_path, monkeypatch):
                            '--backend', 'codex', '--model', 'gpt-6.1-terra', '--blender-mode', 'virtual',
                            '--token-budget', '200000', 'Finish the colon']) == 0
     assert calls[0][0] == run
-    assert calls[0][1]['token_budget'] == 200000
+    assert calls[0][1]['agent_overrides']['token_budget'] == 200000
     assert calls[0][1]['agent_overrides']['prompt'] == 'Finish the colon'
     # Unset flags must not replace the limits saved by the original run.
     assert not {'timeout_s', 'max_repairs'} & set(calls[0][1]['agent_overrides'])
@@ -642,16 +643,16 @@ def test_editor_resume_routes_back_to_parent_pipeline(tmp_path, monkeypatch):
 def test_pipeline_resume_sends_saved_context_and_recovery(body, tmp_path, monkeypatch, continuation):
     import shutil
     captured = []
-    def run_blender(args, workspace, settings, output):
-        if args.command == 'edit':
+    def run_blender(workspace, settings, output, options, *, prompt, fresh, mcp=None):
+        if fresh:
             (workspace / 'edited.blend').touch()
             raise RuntimeError('interrupted')
-        captured.append(args.prompt)
+        captured.append(prompt)
         output.mkdir()
         shutil.copy2(workspace / 'original.usdc', output / 'input.usdc')
-    monkeypatch.setattr(agent_cli, '_run_blender', run_blender)
+    monkeypatch.setattr(session, 'run', run_blender)
     original = 'Refine the liver without changing connectivity'
-    pipeline = PatientWorkflow(cleanup=None, agent=AgentOptions(original),
+    pipeline = PatientWorkflow(cleanup=None, agent=AgentOptions(prompt=original),
                                workspace=tmp_path / 'work', default_textures=False)
     with pytest.raises(RuntimeError, match='interrupted'):
         pipeline.run(body, tmp_path / 'patient.usdc')
@@ -690,7 +691,7 @@ def test_checkpoint_preserves_patient_contract(body, tmp_path):
 
 
 def test_vessel_repair_guidance_is_scoped():
-    from patient_digital_twin.refinement import vessel_repair_guidance
+    from patient_digital_twin.agent.prompts import vessel_repair_guidance
     assert vessel_repair_guidance(['colon', 'liver']) == ''
     for name in ('aorta', 'inferior_vena_cava', 'superior_vena_cava',
                  'iliac_artery_left', 'iliac_vena_right', 'common_carotid_artery_left',
@@ -726,7 +727,7 @@ def test_non_aortic_major_branches_require_explicit_selection(tmp_path):
 
 def test_vessel_branches_default_and_hra_coverage():
     from patient_digital_twin.agent import AgentOptions
-    from patient_digital_twin.refinement import vessel_repair_guidance
+    from patient_digital_twin.agent.prompts import vessel_repair_guidance
     assert AgentOptions(prompt='Inspect').include_major_branches is False
     assert 'Expected groups:' not in vessel_repair_guidance(['aorta'])
     assert 'Expected groups:' in vessel_repair_guidance(['aorta'], True)
@@ -744,25 +745,24 @@ def test_vessel_branches_default_and_hra_coverage():
 
 @pytest.mark.parametrize('continuation', [None, 'Leave the liver unchanged'])
 def test_named_prompt_is_saved_and_sent_to_sdk(body, tmp_path, monkeypatch, continuation):
-    from patient_digital_twin.agent import AgentOptions
-    from patient_digital_twin.agent import __main__ as editor
+    from patient_digital_twin.agent import AgentOptions, SessionOptions
     captured = []
-    monkeypatch.setattr(editor, '_run_blender', lambda args, *rest: captured.append(args.prompt))
+    monkeypatch.setattr(session, 'run', lambda *args, prompt, **kwargs: captured.append(prompt))
     source = body.export_to_usd(tmp_path / 'input.usdc')
     workspace = tmp_path / 'agent'
-    editor.edit_asset(source, tmp_path / 'out',
+    session.edit_asset(source, tmp_path / 'out',
                       AgentOptions(task='refine', targets=('liver',)), workspace=workspace)
     saved = (workspace / 'task_prompt.txt').read_text()
     assert captured == [saved]
     assert 'Operation: refine.' in saved and 'Targets: liver.' in saved
     assert 'without completing missing regions' in saved
     (workspace / 'edited.blend').touch()
-    editor.resume_asset(workspace, tmp_path / 'out', AgentOptions(prompt='Original task'),
+    session.resume_asset(workspace, tmp_path / 'out', SessionOptions(),
                         continuation=continuation)
     expected = saved + ('\n\nAdditional recovery instructions:\n' + continuation if continuation else '')
     assert captured[-1] == expected
     argv = ['resume', '--workspace', str(workspace), '--output', str(tmp_path / 'out'), '--backend', 'codex']
-    assert editor.main(argv + ([continuation] if continuation else [])) == 0
+    assert agent_cli.main(argv + ([continuation] if continuation else [])) == 0
     assert captured[-1] == expected
 
 
@@ -777,9 +777,9 @@ def test_resume_can_switch_backend_and_keeps_saved_limits(body, tmp_path, monkey
         output.mkdir()
         shutil.copy2(workspace.parent / 'input.usdc', output / 'input.usdc')
         return output / 'input.usdc'
-    monkeypatch.setattr(agent_cli, 'edit_asset', interrupted)
-    monkeypatch.setattr(agent_cli, 'resume_asset', resumed)
-    agent = AgentOptions('Edit', backend='claude', max_turns=40, budget_usd=8, timeout_s=3600, max_repairs=5)
+    monkeypatch.setattr(session, 'edit_asset', interrupted)
+    monkeypatch.setattr(session, 'resume_asset', resumed)
+    agent = AgentOptions(prompt='Edit', backend='claude', max_turns=40, budget_usd=8, timeout_s=3600, max_repairs=5)
     with pytest.raises(RuntimeError, match='budget exhausted'):
         PatientWorkflow(cleanup=None, agent=agent, workspace=tmp_path / 'work').run(body, tmp_path / 'patient.usdc')
     run = next((tmp_path / 'work').glob('run-*'))
@@ -791,9 +791,9 @@ def test_resume_can_switch_backend_and_keeps_saved_limits(body, tmp_path, monkey
 def test_resume_does_not_rewrite_supplied_edited_asset(body, tmp_path, monkeypatch):
     def interrupted(*args, **kwargs):
         raise RuntimeError('interrupted')
-    monkeypatch.setattr(agent_cli, 'edit_asset', interrupted)
+    monkeypatch.setattr(session, 'edit_asset', interrupted)
     with pytest.raises(RuntimeError, match='interrupted'):
-        PatientWorkflow(cleanup=None, agent=AgentOptions('Edit'), workspace=tmp_path / 'work').run(
+        PatientWorkflow(cleanup=None, agent=AgentOptions(prompt='Edit'), workspace=tmp_path / 'work').run(
             body, tmp_path / 'patient.usdc')
     run = next((tmp_path / 'work').glob('run-*'))
     reviewed = tmp_path / 'reviewed/patient.usdc'
@@ -867,7 +867,7 @@ def test_failed_regeneration_keeps_supplied_vessel_centerline(tmp_path, monkeypa
                             radii=np.array([.004, .004]), edges=np.array([[0, 1]]))
     patient.anatomy.structures['aorta'].centerline = graph
     def fail(self, **kwargs):
-        raise RuntimeError('Centerline extraction failed for aorta: empty skeleton')
+        raise ValueError('Centerline extraction failed for aorta: empty skeleton')
     monkeypatch.setattr(HumanBody, 'extract_topology', fail)
     output = PatientWorkflow().run(patient, tmp_path / 'patient.usdc')
     stage = Usd.Stage.Open(str(output))

@@ -15,7 +15,7 @@ from patient_digital_twin import (
     PatientWorkflow,
     SegmentationImporter,
 )
-from patient_digital_twin.agent import __main__ as agent_cli
+from patient_digital_twin.agent import session
 from patient_digital_twin.agent.assets import finalize
 from patient_digital_twin.geometry import centerline_spacing
 from patient_digital_twin.scan_volume import from_array
@@ -44,7 +44,7 @@ def patient(request):
     return body
 
 
-def simulate_edit(args, workspace, settings, output):
+def simulate_edit(workspace, settings, output, options, **kwargs):
     """Exercise the real preparation/finalization boundary with a controlled edit."""
     stage = Usd.Stage.Open(str(workspace / 'input.usdc'))
     mesh = UsdGeom.Mesh.Get(stage, '/HumanBody/Anatomy/aorta')
@@ -77,8 +77,8 @@ def test_bundle_matches_reviewed_contract(patient, tmp_path, monkeypatch, editin
                    vessel_names=['aorta'], ct_exterior=True, skin_opacity=.27)
     baseline = patient.export_patient_twin(tmp_path / 'baseline', **options)
     patient.export_to_usd(baseline.parent / 'human_body.usdc')
-    monkeypatch.setattr(agent_cli, '_run_blender', simulate_edit)
-    result = PatientWorkflow(cleanup=None, agent=AgentOptions('edit') if editing else None).run(
+    monkeypatch.setattr(session, 'run', simulate_edit)
+    result = PatientWorkflow(cleanup=None, agent=AgentOptions(prompt='edit') if editing else None).run(
         patient, tmp_path / 'refined', format='bundle', **options)
     original = yaml.safe_load(baseline.read_text())
     manifest = yaml.safe_load(result.read_text())

@@ -25,10 +25,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from nibabel.orientations import apply_orientation, inv_ornt_aff, io_orientation
 from numpy.typing import ArrayLike, NDArray
 
 if TYPE_CHECKING:
     from .scan_volume import ScanVolume
+
+# Default voxel size for rasterizing a mesh before skeletonizing its centerline.
+CENTERLINE_SPACING_M = 0.0015
 
 
 @dataclass
@@ -74,11 +78,11 @@ def centerline_spacing(points: ArrayLike, edges: ArrayLike) -> float:
     """Infer the local grid spacing of a pipeline 26-neighbor centerline graph."""
     points, edges = np.asarray(points), np.asarray(edges)
     if edges.ndim != 2 or edges.shape[1:] != (2,) or not len(edges):
-        raise ValueError('Original centerline has invalid edges')
+        raise ValueError('Centerline has no valid edges')
     steps = points[edges[:, 1]] - points[edges[:, 0]]
     spacing = float(np.median(np.max(np.abs(steps), axis=1)))
     if not np.isfinite(spacing) or spacing <= 0:
-        raise ValueError('Original centerline has invalid grid spacing')
+        raise ValueError('Centerline has no valid grid spacing')
     return spacing
 
 
@@ -150,7 +154,7 @@ def voxelize_mesh(
             vtk_to_numpy,
         )
     except ImportError as exc:
-        raise ImportError("Mesh skeletonization requires VTK: pip install vtk") from exc
+        raise ImportError("Mesh voxelization requires the 'pipeline' extra of patient-digital-twin") from exc
     shape, spacing = np.asarray(shape_zyx), np.asarray(spacing_zyx_m, dtype=float)
     v, f = validate_triangles(vertices, faces)
     t = v[f]
@@ -248,6 +252,16 @@ def extract_centerlines(
     return CenterlineGraph(points=points, radii=radii, edges=edges)
 
 
+def mesh_centerline(vertices: NDArray[np.floating], faces: ArrayLike, spacing_m: float) -> CenterlineGraph:
+    """Centerline of a closed tubular mesh on a grid of ``spacing_m`` voxels fitted around it."""
+    origin = vertices.min(0) - 2 * spacing_m
+    shape = np.ceil((vertices.max(0) - origin) / spacing_m).astype(int) + 3
+    return extract_centerlines(
+        vertices, faces, shape_zyx=(int(shape[2]), int(shape[1]), int(shape[0])),
+        spacing_zyx_m=(spacing_m,) * 3, origin_xyz_m=origin,
+    )
+
+
 def native_centerline(
     mask: NDArray, scan: ScanVolume
 ) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.float32]]:
@@ -270,8 +284,6 @@ def native_centerline(
         raise ValueError("Centerline radii require orthogonal voxel axes; reconstruct sheared grids")
     # Thinning depends on voxel traversal order. Orient a temporary view toward
     # LPS for reproducible graphs, without resampling or changing exported arrays.
-    from nibabel.orientations import apply_orientation, inv_ornt_aff, io_orientation
-
     ijk = mask.transpose([scan.array_axes.index(c) for c in "ijk"])
     lps = np.diag([-1.0, -1.0, 1.0, 1.0]) @ scan.ijk_to_ras_m
     orientation = io_orientation(lps)

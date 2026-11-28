@@ -38,11 +38,11 @@ def test_body_extracts_tubular_anatomy_including_disabled_and_composite(monkeypa
     body.anatomy.structures["empty"] = AnatomicalStructure("empty", Kind.VESSEL)
     calls = []
 
-    def extract(v, f, **grid):
+    def extract(v, f, spacing_m):
         calls.append((v, f))
         return graph()
 
-    monkeypatch.setattr(body_module, "extract_centerlines", extract)
+    monkeypatch.setattr(body_module, "mesh_centerline", extract)
     result = body.extract_topology()
     assert set(result) == {
         "aorta",
@@ -79,13 +79,13 @@ def test_failure_is_named_and_does_not_commit_partial_results(monkeypatch):
     )
     previous = body.anatomy.structures["first"].centerline
 
-    def extract(v, f, **grid):
+    def extract(v, f, spacing_m):
         if v is body.anatomy.structures["second"].mesh.vertices:
             raise ValueError("bad tube")
         return graph()
 
-    monkeypatch.setattr(body_module, "extract_centerlines", extract)
-    with pytest.raises(RuntimeError, match="second: bad tube"):
+    monkeypatch.setattr(body_module, "mesh_centerline", extract)
+    with pytest.raises(ValueError, match="second: bad tube"):
         body.extract_topology()
     assert body.anatomy.structures["first"].centerline is previous
 
@@ -110,7 +110,7 @@ def test_topology_selection_preserves_other_centerlines(monkeypatch):
         }
     )
     original = body.anatomy.structures["aorta"].centerline
-    monkeypatch.setattr(body_module, "extract_centerlines", lambda v, f, **grid: graph())
+    monkeypatch.setattr(body_module, "mesh_centerline", lambda v, f, spacing_m: graph())
     assert set(body.extract_topology(names=["vascular_tree"])) == {"vascular_tree"}
     assert body.anatomy.structures["aorta"].centerline is original
     with pytest.raises(KeyError, match="Unknown anatomy"):

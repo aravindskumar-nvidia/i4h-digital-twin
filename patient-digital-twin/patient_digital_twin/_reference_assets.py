@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import time
 import urllib.error
@@ -20,12 +21,18 @@ from pathlib import Path
 
 import numpy as np
 
+from ._cache import cache_directory
+
 logger = logging.getLogger(__name__)
 _RANGE_CHUNK_BYTES = 8 * 1024 * 1024
 
 
+class _RangeNotHonored(Exception):
+    """The server answered a byte-range request without that byte range."""
+
+
 def _download_ranges(url: str, destination: Path, size: int) -> None:
-    """Fetch a known-size archive in bounded ranges without buffering it in memory."""
+    """Fetch a known-size archive in parallel byte ranges without buffering it in memory."""
     with destination.open('wb') as stream:
         stream.truncate(size)
 
@@ -37,7 +44,7 @@ def _download_ranges(url: str, destination: Path, size: int) -> None:
         })
         with urllib.request.urlopen(request, timeout=30) as response:
             if response.status != 206 or response.headers.get('Content-Range') != f'bytes {start}-{end}/{size}':
-                raise ValueError(f'Reference source returned an unexpected byte range: {url}')
+                raise _RangeNotHonored(url)
             # Separate descriptors give concurrent writes independent file offsets.
             with destination.open('r+b') as stream:
                 stream.seek(start)
@@ -53,7 +60,14 @@ def _download_ranges(url: str, destination: Path, size: int) -> None:
     try:
         list(workers.map(fetch, range(0, size, _RANGE_CHUNK_BYTES)))
     finally:
+        # Stop queued ranges as soon as one fails.
         workers.shutdown(wait=True, cancel_futures=True)
+
+
+def _download_stream(url: str, destination: Path) -> None:
+    request = urllib.request.Request(url, headers={'User-Agent': 'i4h-digital-twin'})
+    with urllib.request.urlopen(request, timeout=30) as response, destination.open('wb') as stream:
+        shutil.copyfileobj(response, stream, 1024 * 1024)
 
 
 def _checksum(path: Path, algorithm: str = 'sha256') -> str:
@@ -74,25 +88,24 @@ def _download(source: dict, cache: Path, suffix: str) -> Path:
     destination = cache / 'downloads' / (algorithm + '-' + expected + suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_file():
-        if _checksum(destination, algorithm) != expected:
-            raise ValueError(f'Cached reference checksum mismatch: {destination}')
-        return destination
+        if _checksum(destination, algorithm) == expected:
+            return destination
+        logger.warning('Cached reference %s fails its checksum; downloading it again', destination)
+        destination.unlink()
     urls = [source['url'], *source.get('alternate_urls', [])]
     for attempt in range(3):
-        temporary = None
         url = urls[attempt % len(urls)]
+        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
+            temporary = Path(stream.name)
         try:
-            if size is not None:
-                with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
-                    temporary = Path(stream.name)
-                _download_ranges(url, temporary, size)
+            if size is None:
+                _download_stream(url, temporary)
             else:
-                request = urllib.request.Request(url, headers={'User-Agent': 'i4h-digital-twin'})
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as stream:
-                        temporary = Path(stream.name)
-                        for chunk in iter(lambda: response.read(1024 * 1024), b''):
-                            stream.write(chunk)
+                try:
+                    _download_ranges(url, temporary, size)
+                except _RangeNotHonored:
+                    logger.warning('%s does not serve byte ranges; downloading it as one stream', url)
+                    _download_stream(url, temporary)
             if _checksum(temporary, algorithm) != expected:
                 raise ValueError(f'Downloaded reference checksum mismatch: {url}')
             os.replace(temporary, destination)
@@ -108,8 +121,7 @@ def _download(source: dict, cache: Path, suffix: str) -> Path:
             logger.warning('Reference download attempt %d/3 failed (%s); retrying', attempt + 1, error)
             time.sleep(2 ** attempt)
         finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
     raise AssertionError('Unreachable download state')
 
 
@@ -124,8 +136,7 @@ def materialize(metadata: dict, directory: Path, cache: Path | None = None, *,
     generated GLBs live outside the repository. A completed manifest is published
     last, allowing interrupted and concurrent attempts to retain consistent caches.
     """
-    default = Path(os.environ.get('XDG_CACHE_HOME', str(Path.home() / '.cache'))) / 'i4h/references'
-    cache = Path(cache or os.environ.get('I4H_REFERENCE_CACHE', str(default))).expanduser().resolve()
+    cache = Path(cache or os.environ.get('I4H_REFERENCE_CACHE') or cache_directory('references')).expanduser().resolve()
     recipe = metadata['preparation']
     kind = recipe['kind']
     if kind == 'download-glb':

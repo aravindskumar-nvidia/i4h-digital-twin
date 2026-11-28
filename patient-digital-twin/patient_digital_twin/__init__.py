@@ -20,9 +20,14 @@ from .importers import (
     SegmentationImporter,
     SimpleImporter,
 )
-from .references import TextureReference
 from .surface import CleanupOptions, CleanupResult, prepare_surface
-from .texturing import TextureOptions, TextureResult, TextureRuntime, texture_mesh
+from .texturing import (
+    TextureOptions,
+    TextureReference,
+    TextureResult,
+    TextureRuntime,
+    texture_mesh,
+)
 from .workflow import PatientWorkflow
 
 __all__ = [
