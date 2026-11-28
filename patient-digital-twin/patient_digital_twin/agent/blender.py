@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Small scene handoff, executed inside Blender through upstream Blender MCP."""
+"""Small scene handoff, executed inside Blender through upstream Blender MCP.
+
+Blender modules are imported inside each function: other code imports this module
+only to locate the file it sends to Blender.
+"""
 import contextlib
 import json
 from pathlib import Path
@@ -23,6 +27,7 @@ def _check_usd_support():
 
 def open_asset(directory):
     import bpy
+    from mathutils import Matrix
 
     _check_usd_support()
     folder = Path(directory)
@@ -35,8 +40,6 @@ def open_asset(directory):
     scene.unit_settings.system = 'METRIC'
     scene.unit_settings.scale_length = 1.0
     bpy.ops.wm.usd_import(filepath=str(folder / 'input.usdc'), **USD_IMPORT_OPTIONS)
-    from mathutils import Matrix
-
     # Bake import unit/parent transforms so mesh editing coordinates are meters.
     for obj in scene.objects:
         if obj.type == 'MESH':

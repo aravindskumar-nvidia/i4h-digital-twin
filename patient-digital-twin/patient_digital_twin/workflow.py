@@ -18,7 +18,7 @@ from ._workflow_checkpoint import Checkpoint
 from .agent import AgentOptions
 from .anatomy import Kind, canonical_name
 from .body import HumanBody
-from .export import SKIN_OPACITY, USD_SUFFIXES, _publish, publish_usd
+from .export import SKIN_OPACITY, USD_SUFFIXES, publish_directory, publish_usd
 from .geometry import CENTERLINE_SPACING_M, CenterlineGraph, centerline_spacing
 from .surface import CleanupOptions, prepare_surface
 from .texturing import (
@@ -203,7 +203,7 @@ class PatientWorkflow:
             shutil.copytree(edited.parent / 'refinement', package / 'refinement')
         (package / 'workflow.json').write_text(json.dumps(state['report'], indent=2) + '\n')
         if export['format'] == 'bundle':
-            result = _publish(output, '.refined-patient-', lambda folder: shutil.copytree(package, folder))
+            result = publish_directory(output, '.refined-patient-', lambda folder: shutil.copytree(package, folder))
             result /= manifest.name
         else:
             result = publish_usd(usd_files[0], output)

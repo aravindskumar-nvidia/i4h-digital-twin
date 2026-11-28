@@ -146,6 +146,7 @@ def run_codex(prompt: str, workspace: Path, config: dict, model: str | None, tim
                 raise TimeoutError('Agent editing timed out')
             turn = thread.turn(prompt)
             def interrupt():
+                # The turn may already have finished when the timer or an error interrupts it.
                 with contextlib.suppress(Exception):
                     turn.interrupt()
             timer = Timer(remaining, interrupt)

@@ -16,18 +16,18 @@ from collections.abc import Sequence
 from pathlib import Path
 
 SAMPLE = Path(__file__).resolve().parent / "data/s0011"
+RESOLUTION = (960, 720)
 
 
 def generate_body(output: str | Path, *, names: Sequence[str] = ("aorta",), with_ct: bool = False) -> Path:
     """Mesh the named s0011 masks, optionally embed the matching CT, and write a USD; returns its path."""
+    # `view` runs under Isaac Sim's Python, which need not have this package installed.
     from patient_digital_twin import HumanBody, SegmentationImporter
     from patient_digital_twin.scan_volume import from_nifti
 
     body = HumanBody(SegmentationImporter(SAMPLE / "segmentations", names=names).to_anatomy_collection())
     if with_ct:
         body.attach_scan(from_nifti(SAMPLE / "ct.nii.gz"))
-    output = Path(output).expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
     return body.export_to_usd(output)
 
 
@@ -43,10 +43,12 @@ def view_usd(path: str | Path, *, headless: bool = False, frames: int = 0, scree
         raise ValueError("Headless viewing requires a positive --frames limit")
     from isaacsim import SimulationApp
 
-    app = SimulationApp({"headless": headless, "width": 960, "height": 720})
+    app = SimulationApp({"headless": headless, "width": RESOLUTION[0], "height": RESOLUTION[1]})
     try:
+        # Kit modules can only be imported once the application is running.
         import omni.usd
         from isaacsim.core.utils.stage import is_stage_loading, open_stage
+        from omni.kit.viewport.utility import get_active_viewport
         from pxr import Gf, Usd, UsdGeom, UsdLux
 
         if not open_stage(str(path)):
@@ -77,22 +79,19 @@ def view_usd(path: str | Path, *, headless: bool = False, frames: int = 0, scree
         eye = center + Gf.Vec3d(offset, -offset, offset)
         camera.MakeMatrixXform().Set(Gf.Matrix4d().SetLookAt(eye, center, Gf.Vec3d(0, 0, 1)).GetInverse())
         camera.CreateClippingRangeAttr(Gf.Vec2f(distance / 10000, distance * 10))
-        from omni.kit.viewport.utility import get_active_viewport
-
         viewport = get_active_viewport()
         if viewport is not None:
             viewport.camera_path = camera.GetPath()
         if screenshot is not None:
-            import numpy as np
             import omni.replicator.core as rep
             from PIL import Image
 
-            product = rep.create.render_product(str(camera.GetPath()), (960, 720))
+            product = rep.create.render_product(str(camera.GetPath()), RESOLUTION)
             rgb = rep.AnnotatorRegistry.get_annotator("rgb")
             rgb.attach(product)
             rep.orchestrator.step(rt_subframes=8)
             pixels = rgb.get_data()
-            if pixels.size == 0 or not np.isfinite(pixels).all() or pixels[..., :3].std() == 0:
+            if pixels.size == 0 or pixels[..., :3].std() == 0:
                 raise RuntimeError("Viewer produced an empty or uniform image")
             screenshot = Path(screenshot)
             screenshot.parent.mkdir(parents=True, exist_ok=True)
